@@ -899,7 +899,6 @@ wheels = [
 
 [[package]]
 name = "moodsona"
-version = "0.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "pyyaml" },
@@ -939,7 +938,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.17" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.12" },
 ]
-provides-extras = ["anthropic", "openai", "dev"]
+provides-extras = ["anthropic", "dev", "openai"]
 
 [[package]]
 name = "mypy"

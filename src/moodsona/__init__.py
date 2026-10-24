@@ -14,8 +14,6 @@ Swap ``FakeProvider()`` for ``AnthropicProvider()`` or ``OpenAIProvider()``
 for your own chatbot wrapped in the :class:`Companion` protocol.
 """
 
-from importlib.metadata import PackageNotFoundError, version
-
 from moodsona.companion import Companion, EchoCompanion, ScriptedCompanion, ScriptExhaustedError
 from moodsona.llm import ChatMessage, FakeProvider, LLMError, LLMProvider, LLMResponse
 from moodsona.parse import HiddenBlock, ParseError
@@ -38,11 +36,7 @@ from moodsona.state import (
     ReactionRule,
     Stance,
 )
-
-try:
-    __version__ = version("moodsona")
-except PackageNotFoundError:  # pragma: no cover - running from an uninstalled checkout
-    __version__ = "0.0.0+unknown"
+from moodsona.version import __version__
 
 __all__ = [
     "ChatMessage",
