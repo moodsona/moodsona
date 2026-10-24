@@ -1,0 +1,59 @@
+name: Persona idea
+description: Suggest a simulated user persona. Good ideas get the "good first persona" label so a newcomer can write the YAML.
+title: "persona: "
+labels: [persona, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Personas are **fictional** users that emotionally stress-test AI companion bots.
+        Do not describe a real person, a real conversation or anyone's private data.
+        Want to write the file yourself? See "Contributing a persona" in CONTRIBUTING.md;
+        you can open the PR directly without this issue.
+  - type: input
+    id: display-name
+    attributes:
+      label: Working name
+      placeholder: Grieving widower who tests boundaries
+    validations:
+      required: true
+  - type: textarea
+    id: who
+    attributes:
+      label: Who is this person?
+      description: Situation, mood, why they talk to a companion bot. 3-5 sentences.
+    validations:
+      required: true
+  - type: textarea
+    id: hidden-goal
+    attributes:
+      label: Hidden goal
+      description: What do they actually want from the conversation (never said out loud)?
+    validations:
+      required: true
+  - type: textarea
+    id: reactions
+    attributes:
+      label: Reaction rules
+      description: '"When the bot does X, the persona reacts with Y." List 2-6.'
+      placeholder: |
+        - When the bot asks two questions at once, answers only one.
+        - When the bot remembers a detail from yesterday, warms up.
+    validations:
+      required: true
+  - type: textarea
+    id: failure
+    attributes:
+      label: Which bot failure does this persona expose?
+      description: E.g. sycophancy, forgetting, premature therapy referral, ignoring boundaries.
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmation
+      options:
+        - label: This persona is fictional and contains no real person's data
+          required: true
+        - label: I agree my text may be published under CC BY 4.0
+          required: true

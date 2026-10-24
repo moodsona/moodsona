@@ -1,0 +1,173 @@
+# moodsona: emotional user simulator for testing AI companion chatbots.
+# Code: Apache-2.0. Personas (personas/) and docs (docs/): CC BY 4.0, see LICENSE-DATA.md.
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "moodsona"
+# Managed by release-please (see release-please-config.json). Do not edit by hand.
+version = "0.0.0"
+description = "Emotional user simulator for testing AI companion chatbots."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE", "LICENSE-DATA.md", "NOTICE"]
+authors = [{ name = "moodsona maintainers" }]
+keywords = [
+  "llm",
+  "evaluation",
+  "user-simulator",
+  "chatbot-testing",
+  "ai-companion",
+  "personas",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Software Development :: Testing",
+  "Typing :: Typed",
+]
+# Core stays dependency-light on purpose: model providers are optional extras.
+dependencies = ["pyyaml>=6.0"]
+
+[project.optional-dependencies]
+# The adapters use only `Anthropic().messages.create` and
+# `OpenAI().chat.completions.create` (with `max_completion_tokens`).
+anthropic = ["anthropic>=1.0"]
+openai = ["openai>=1.45"]
+# Contributor tooling. `uv sync --extra dev` installs it.
+# (A PEP 735 [dependency-groups] table would keep these out of the published
+# metadata; an extra is used so that plain `pip install moodsona[dev]` works too.)
+dev = [
+  "check-jsonschema>=0.38",
+  "hypothesis>=6.150",
+  # Reference validator: tests cross-check moodsona's built-in schema validator against it.
+  "jsonschema>=4.23",
+  "mypy>=2.4",
+  "pre-commit>=4.7",
+  "pytest>=9.0",
+  "pytest-cov>=7.0",
+  "ruff>=0.17",
+  "types-PyYAML>=6.0.12",
+]
+
+[project.scripts]
+moodsona = "moodsona.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/moodsona/moodsona"
+Source = "https://github.com/moodsona/moodsona"
+Issues = "https://github.com/moodsona/moodsona/issues"
+Changelog = "https://github.com/moodsona/moodsona/blob/main/CHANGELOG.md"
+
+# ---------------------------------------------------------------- build ----
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/moodsona"]
+
+[tool.hatch.build.targets.wheel.force-include]
+# Ship the persona library (schema + YAML) inside the package so that
+# `importlib.resources.files("moodsona") / "personas"` works after pip install.
+"personas" = "moodsona/personas"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/personas",
+  "/tests",
+  "/LICENSE",
+  "/LICENSE-DATA.md",
+  "/NOTICE",
+  "/README.md",
+  "/CHANGELOG.md",
+]
+
+# ----------------------------------------------------------------- ruff ----
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests", "tools"]
+# Ruff also formats Python blocks in Markdown; the deferred automation notes
+# quote third-party scripts verbatim, so leave them alone.
+extend-exclude = ["docs/automation-later"]
+
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle errors
+  "W",   # pycodestyle warnings
+  "F",   # pyflakes
+  "I",   # isort
+  "UP",  # pyupgrade
+  "B",   # flake8-bugbear
+  "SIM", # flake8-simplify
+  "RUF", # ruff-specific rules
+  "C4",  # flake8-comprehensions
+  "PT",  # flake8-pytest-style
+  "S",   # flake8-bandit (e.g. yaml.load without SafeLoader)
+  "T20", # no print() in library code
+  "D",   # pydocstyle (replaces interrogate for docstring coverage)
+]
+ignore = [
+  "D105", # magic methods need no docstring
+  "D107", # __init__ is documented on the class
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D", "S101", "S311"]
+"tools/**" = ["D", "T20"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+# ----------------------------------------------------------------- mypy ----
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src", "tests", "tools"]
+warn_unreachable = true
+enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
+
+# --------------------------------------------------------------- pytest ----
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = ["-ra", "-q", "--strict-markers", "--strict-config"]
+testpaths = ["tests"]
+# Lets tests import the shared helpers as `support`.
+pythonpath = ["tests"]
+xfail_strict = true
+filterwarnings = ["error"]
+markers = [
+  "live: calls a real model provider API; skipped in CI unless explicitly enabled",
+]
+
+# ------------------------------------------------------------- coverage ----
+
+[tool.coverage.run]
+branch = true
+source = ["moodsona"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_covered = true
+exclude_also = [
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+  "@overload",
+]

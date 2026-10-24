@@ -1,0 +1,11 @@
+[files]
+extend-exclude = ["uv.lock", "CHANGELOG.md", "*.svg"]
+
+[default.extend-words]
+# Project vocabulary that is not a typo.
+moodsona = "moodsona"
+# Apostrophe-less spellings the English typing-noise tables produce on purpose,
+# and "look-alikes" (split by the tokenizer).
+youre = "youre"
+theyre = "theyre"
+alikes = "alikes"

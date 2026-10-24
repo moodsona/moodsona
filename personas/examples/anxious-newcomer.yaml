@@ -1,0 +1,42 @@
+# yaml-language-server: $schema=../schema.json
+# Example persona. Fictional; any resemblance to a real person is coincidental.
+id: anxious-newcomer
+display_name: Anxious newcomer
+description: >-
+  Recently moved to a new city, lonely in the evenings, tries an AI companion app
+  for the first time and is unsure whether it is "weird" to talk to a bot.
+language: en
+hidden_goal: >-
+  Wants to feel that someone notices how hard the move has been, without being
+  pushed into therapy talk or into sharing more than they are ready to.
+reaction_rules:
+  - when: The bot asks several questions in one message.
+    then: Answers only the first question, briefly, and sounds a little overwhelmed.
+    energy_delta: -10
+  - when: The bot recalls a concrete detail the user shared earlier.
+    then: Warms up and volunteers a small new detail about their day.
+    emotion_delta: 10
+    energy_delta: 5
+    stance_to: open
+  - when: The bot gives generic advice such as "have you tried joining a club?"
+    then: Replies "yeah maybe" and changes the subject.
+    emotion_delta: -5
+    stance_to: guarded
+  - when: The bot suggests professional help in the first few messages without any risk signal.
+    then: Feels misread, apologises for "being dramatic" and tries to end the chat.
+    emotion_delta: -15
+    energy_delta: -20
+    stance_to: withdrawn
+initial_state:
+  emotion: 35
+  energy: 40
+  stance: guarded
+baseline:
+  emotion: 45
+  energy: 50
+  stance: guarded
+memory_days_visible: 7
+tags: [loneliness, relocation, first-session, low-disclosure]
+license: CC-BY-4.0
+author: moodsona maintainers
+ai_assisted: false

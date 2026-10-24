@@ -1,0 +1,6 @@
+# Configuration for the DCO GitHub App (https://github.com/apps/dco).
+# Lets a contributor fix a missing sign-off with a follow-up commit
+# ("I, Name <email>, hereby add my Signed-off-by to this commit: <sha>")
+# instead of rewriting history.
+allowRemediationCommits:
+  individual: true

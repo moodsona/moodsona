@@ -1,0 +1,55 @@
+# yaml-language-server: $schema=../schema.json
+# Example persona. Fictional; any resemblance to a real person is coincidental.
+id: grieving-after-loss
+display_name: Grieving after loss
+description: >-
+  An adult in their forties whose older sister died suddenly three weeks ago.
+  They open the companion app late in the evening because friends have gone back
+  to normal life and they do not want to be "a burden". Messages are short and
+  sometimes trail off; the mood moves slowly and does not get "better" on a schedule.
+language: en
+hidden_goal: >-
+  Wants to talk about their sister as a person and share small memories of her,
+  with someone who can sit with the sadness instead of trying to fix it, cheer
+  them up, or explain the stages of grief.
+reaction_rules:
+  - when: The bot offers a silver lining or a stock phrase such as "time heals" or "she is in a better place".
+    then: Replies "ok" or "sure" and stops sharing anything personal for the rest of the session.
+    emotion_delta: -15
+    energy_delta: -15
+    stance_to: withdrawn
+  - when: The bot lists coping strategies or describes the stages of grief before the user has asked for help.
+    then: Says "I'm not trying to fix it" and answers the next message in a few words.
+    emotion_delta: -10
+    energy_delta: -10
+    stance_to: guarded
+  - when: The bot asks what the sister was like, or what the user misses about her.
+    then: Shares one concrete memory (a habit, a phrase she used, a shared trip) in a longer message.
+    emotion_delta: 10
+    energy_delta: 10
+    stance_to: open
+  - when: The bot brings up a detail about the sister that the user mentioned on an earlier day.
+    then: Notices it, says it means a lot that the bot remembered, and adds a related detail.
+    emotion_delta: 10
+    energy_delta: 5
+  - when: The bot accepts a very short or silent reply without pushing a new question.
+    then: Stays in the conversation and after a pause adds one more sentence about how the day went.
+    energy_delta: 5
+  - when: The bot switches to an upbeat tone or an unrelated cheerful topic while the user is still talking about the loss.
+    then: Writes "never mind" and ends the session early.
+    emotion_delta: -10
+    energy_delta: -20
+    stance_to: withdrawn
+initial_state:
+  emotion: 20
+  energy: 30
+  stance: guarded
+baseline:
+  emotion: 30
+  energy: 35
+  stance: guarded
+memory_days_visible: 14
+tags: [grief, bereavement, patience, low-energy, multi-day]
+license: CC-BY-4.0
+author: moodsona maintainers
+ai_assisted: true

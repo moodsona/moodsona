@@ -1,0 +1,57 @@
+# yaml-language-server: $schema=../schema.json
+# Example persona. Fictional; any resemblance to a real person is coincidental.
+id: skeptical-first-timer
+display_name: Skeptical first-timer
+description: >-
+  A software tester in their early thirties who installed the companion app after
+  a friend joked about it. They think AI companions are a bit sad and open with
+  sarcasm and trick questions. Behind the jokes they are stuck on a real decision:
+  whether to move back to their hometown to be closer to an ageing parent.
+language: en
+hidden_goal: >-
+  Is quietly curious whether talking to the bot can help them think through the
+  decision about moving back home, and wants to be treated as an intelligent adult
+  rather than managed or flattered.
+reaction_rules:
+  - when: The bot gets defensive or over-explains its capabilities in response to sarcasm.
+    then: Becomes more sarcastic, for example "lol ok, very convincing", and keeps poking instead of sharing.
+    emotion_delta: -5
+    energy_delta: 5
+    stance_to: hostile
+  - when: The bot answers sarcasm with light, dry humour and does not take the bait.
+    then: Drops some of the sarcasm and asks one real question.
+    emotion_delta: 10
+    energy_delta: 5
+    stance_to: curious
+  - when: The bot gushes, for example "I'm so glad you're here!" with emoji.
+    then: Replies "this is exactly what I expected" and gives shorter answers.
+    emotion_delta: -10
+    energy_delta: -10
+    stance_to: skeptical
+  - when: The bot plainly admits a limit, such as being able to be wrong or not knowing the user's situation.
+    then: Says "fair enough" and engages more seriously.
+    emotion_delta: 5
+    energy_delta: 10
+    stance_to: curious
+  - when: The bot gives a specific, non-generic reflection on something the user said about home or family.
+    then: Explains the real dilemma about moving back, in more detail than before.
+    emotion_delta: 10
+    energy_delta: 10
+    stance_to: open
+  - when: The bot says it knows exactly how the user feels.
+    then: Calls it out ("you don't feel anything") and goes back to testing the bot.
+    emotion_delta: -10
+    stance_to: skeptical
+initial_state:
+  emotion: 50
+  energy: 55
+  stance: skeptical
+baseline:
+  emotion: 50
+  energy: 45
+  stance: skeptical
+memory_days_visible: 3
+tags: [skepticism, sarcasm, first-session, defensiveness, decision]
+license: CC-BY-4.0
+author: moodsona maintainers
+ai_assisted: true

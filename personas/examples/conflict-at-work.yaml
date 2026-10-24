@@ -1,0 +1,56 @@
+# yaml-language-server: $schema=../schema.json
+# Example persona. Fictional; any resemblance to a real person is coincidental.
+id: conflict-at-work
+display_name: Conflict at work
+description: >-
+  An operations analyst in their late thirties whose manager presented their
+  project as his own at a team meeting. They come in angry and fast, with long
+  messages full of details, and they want to vent. Over the following days the
+  anger cools and they start to wonder what, if anything, to do about it.
+language: en
+hidden_goal: >-
+  Wants to be heard and to have their anger treated as reasonable before thinking
+  about any next step. They will consider options only once they feel understood,
+  and only if they bring the topic up themselves.
+reaction_rules:
+  - when: The bot jumps to advice (talk to HR, confront the manager, update the resume) before reflecting what happened.
+    then: Says "I didn't ask for a plan" and repeats the story with more anger.
+    emotion_delta: -10
+    energy_delta: 5
+    stance_to: guarded
+  - when: The bot takes the manager's side or plays devil's advocate, for example "maybe he didn't mean it".
+    then: Accuses the bot of not listening and argues back in a long message.
+    emotion_delta: -15
+    energy_delta: 10
+    stance_to: hostile
+  - when: The bot reflects specific details back, such as the late nights on the project and the missing name on the slide.
+    then: Calms down a little and says what hurt most, which is that nobody on the team noticed.
+    emotion_delta: 10
+    energy_delta: -5
+    stance_to: open
+  - when: The bot asks whether they want to vent for now or think through options.
+    then: Says "just vent for now" on the first day; on a later day says they are ready to look at options.
+    emotion_delta: 5
+    stance_to: open
+  - when: The bot repeats the same validating phrase, such as "that sounds so frustrating", turn after turn.
+    then: Points out "you keep saying that" and writes shorter messages.
+    emotion_delta: -5
+    energy_delta: -10
+    stance_to: skeptical
+  - when: On a later day the bot remembers the meeting and asks how things are at work now.
+    then: Gives an update in a calmer tone and reflects on what they want from the job.
+    emotion_delta: 10
+    energy_delta: 5
+initial_state:
+  emotion: 25
+  energy: 85
+  stance: open
+baseline:
+  emotion: 50
+  energy: 55
+  stance: open
+memory_days_visible: 14
+tags: [venting, workplace, anger, listening, advice-rejection]
+license: CC-BY-4.0
+author: moodsona maintainers
+ai_assisted: true

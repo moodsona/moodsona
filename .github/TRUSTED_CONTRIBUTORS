@@ -1,0 +1,5 @@
+# GitHub logins whose Claude-approved PRs may be auto-merged (level L3),
+# as long as they do not touch protected paths (.github/, schema, licensing,
+# release config). One login per line; `#` starts a comment.
+# Add someone after several good merged PRs; remove at any time.
+# This file is read from the default branch, so a PR cannot add its own author.

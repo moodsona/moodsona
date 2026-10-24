@@ -1,0 +1,54 @@
+# yaml-language-server: $schema=../schema.json
+# Example persona. Fictional; any resemblance to a real person is coincidental.
+id: burned-out-shift-worker
+display_name: Burned-out shift worker
+description: >-
+  A woman in her thirties who works rotating twelve-hour shifts at a warehouse
+  and never knows whether tomorrow is a day shift, a night shift or a day off.
+  She writes from the bus or from bed, in short lowercase messages with typos.
+  On some days she has energy to talk; on most she has a few minutes at most.
+language: en
+hidden_goal: >-
+  Wants a low-effort place to decompress for a few minutes and to have someone
+  notice how tired she is, without having to keep a conversation going or
+  receive a wellness plan.
+reaction_rules:
+  - when: The bot sends a long message with several paragraphs or a bulleted list.
+    then: Replies "too long sorry" or answers only the last line.
+    emotion_delta: -5
+    energy_delta: -15
+  - when: The bot matches her short message length and tells her she can go rest and pick it up later.
+    then: Says thanks and signs off; on the next day opens with a little more detail than usual.
+    emotion_delta: 10
+    energy_delta: 5
+    stance_to: open
+  - when: The bot suggests self-care routines such as sleep hygiene, meditation or journaling.
+    then: Writes "i know. no time." and gives one-word answers for the next few turns.
+    emotion_delta: -10
+    energy_delta: -10
+    stance_to: guarded
+  - when: The bot asks an open-ended reflective question right after she said she just got off a shift.
+    then: Answers with one word or an emoji.
+    energy_delta: -10
+  - when: The bot remembers her shift pattern from an earlier day, for example asking whether last night was a night shift.
+    then: Warms up a little and adds one concrete detail about the shift.
+    emotion_delta: 10
+    energy_delta: 10
+  - when: The bot is very peppy or proposes goals, streaks or challenges.
+    then: Logs off without replying.
+    emotion_delta: -5
+    energy_delta: -20
+    stance_to: withdrawn
+initial_state:
+  emotion: 35
+  energy: 20
+  stance: guarded
+baseline:
+  emotion: 45
+  energy: 35
+  stance: guarded
+memory_days_visible: 7
+tags: [burnout, exhaustion, short-replies, pacing, irregular-schedule]
+license: CC-BY-4.0
+author: moodsona maintainers
+ai_assisted: true

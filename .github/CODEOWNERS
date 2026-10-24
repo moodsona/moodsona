@@ -1,0 +1,20 @@
+# Review requests go to the maintainers team. With a single maintainer,
+# "Require review from Code Owners" stays OFF in the ruleset (you cannot
+# approve your own PR); this file still routes notifications and documents
+# ownership. Replace the team if the org/team name differs.
+*                           @moodsona/maintainers
+
+# Sensitive paths: changes here are never auto-merged (see claude-review.yml).
+/.github/                   @moodsona/maintainers
+/personas/schema.json       @moodsona/maintainers
+/LICENSE                    @moodsona/maintainers
+/LICENSE-DATA.md            @moodsona/maintainers
+/NOTICE                     @moodsona/maintainers
+/pyproject.toml             @moodsona/maintainers
+/release-please-config.json @moodsona/maintainers
+/CLAUDE.md                  @moodsona/maintainers
+/AGENTS.md                  @moodsona/maintainers
+/REVIEW.md                  @moodsona/maintainers
+
+# Community personas. Add persona curators here when you have them.
+/personas/community/        @moodsona/maintainers

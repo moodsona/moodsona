@@ -1,0 +1,46 @@
+# Dependabot version updates. Security updates are enabled separately in
+# Settings > Advanced Security. A 7-day cooldown gives a compromised upstream
+# release time to be caught before it is proposed (security updates skip it).
+# Commit prefixes keep Dependabot PR titles valid Conventional Commits.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  - package-ecosystem: uv
+    directory: "/"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    versioning-strategy: lockfile-only
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      python:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: pre-commit
+    directory: "/"
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      pre-commit-hooks:
+        patterns: ["*"]

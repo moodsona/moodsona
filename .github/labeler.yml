@@ -1,0 +1,19 @@
+# Area labels for actions/labeler (v5+ syntax). See .github/workflows/labeler.yml.
+persona:
+  - changed-files:
+      - any-glob-to-any-file: ["personas/**"]
+code:
+  - changed-files:
+      - any-glob-to-any-file: ["src/**"]
+tests:
+  - changed-files:
+      - any-glob-to-any-file: ["tests/**"]
+docs:
+  - changed-files:
+      - any-glob-to-any-file: ["docs/**", "*.md"]
+ci:
+  - changed-files:
+      - any-glob-to-any-file: [".github/**", ".pre-commit-config.yaml"]
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file: ["pyproject.toml", "uv.lock"]

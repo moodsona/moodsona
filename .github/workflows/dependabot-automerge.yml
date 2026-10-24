@@ -1,0 +1,42 @@
+# Auto-merge low-risk Dependabot PRs once required checks pass.
+# Pattern from GitHub's docs ("Automating Dependabot with GitHub Actions").
+# Only patch/minor bumps of GitHub Actions and pre-commit hooks, and patch
+# bumps of Python packages. Majors always wait for the maintainer.
+# `package-ecosystem` values come from the Dependabot branch name
+# (dependabot/github_actions/..., dependabot/pre_commit/..., dependabot/uv/...).
+name: Dependabot auto-merge
+
+on: pull_request
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  dependabot:
+    name: enable auto-merge
+    if: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && github.repository == 'moodsona/moodsona' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # required by the auto-merge API
+      pull-requests: write # enable auto-merge on the PR
+    steps:
+      - name: Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable auto-merge
+        if: >-
+          ${{
+            ((steps.metadata.outputs.package-ecosystem == 'github_actions' || steps.metadata.outputs.package-ecosystem == 'pre_commit')
+              && steps.metadata.outputs.update-type != 'version-update:semver-major')
+            || steps.metadata.outputs.update-type == 'version-update:semver-patch'
+          }}
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr merge --auto --squash "$PR_URL"

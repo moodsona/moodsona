@@ -1,0 +1,195 @@
+# CI for every pull request (including forks) and every push to main.
+#
+# Security model: `pull_request` runs the PR's own code with a read-only
+# GITHUB_TOKEN and no secrets, which is what we want for untrusted forks.
+# Nothing here needs a secret. Required status check in the ruleset: `ci-ok`.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  FORCE_COLOR: "1"
+  PYTHONUTF8: "1"
+  UV_PYTHON_PREFERENCE: only-managed
+
+jobs:
+  lint:
+    name: lint (ruff, typos)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync --locked --extra dev
+      - run: uv run ruff check --output-format=github .
+      - run: uv run ruff format --check .
+      - run: uvx typos@1.51.1
+
+  typecheck:
+    name: typecheck (mypy --strict)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.11" # type-check against the oldest supported version
+          enable-cache: true
+      - run: uv sync --locked --extra dev
+      - run: uv run mypy
+
+  test:
+    name: test (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+      - run: uv sync --locked --extra dev
+      # `live` tests call real model APIs and never run in CI (no secrets here).
+      # Coverage threshold (fail_under = 85) comes from pyproject.toml.
+      - run: uv run pytest -m "not live" --cov --cov-report=xml --cov-report=term
+      - name: Upload coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-${{ matrix.os }}-py${{ matrix.python }}
+          path: coverage.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+  personas:
+    name: personas (schema + cross-file checks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync --locked --extra dev
+      - name: The schema is a valid JSON Schema
+        run: uv run check-jsonschema --check-metaschema personas/schema.json
+      - name: Every persona file matches the schema
+        run: |
+          find personas -type f \( -name '*.yaml' -o -name '*.yml' \) -print0 \
+            | xargs -0 --no-run-if-empty uv run check-jsonschema --schemafile personas/schema.json
+      - name: Cross-file checks (id = file name, unique ids, no contact data)
+        run: uv run python tools/validate_personas.py
+
+  build:
+    name: build (sdist + wheel)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv build
+      - run: uvx twine@7.0.0 check --strict dist/*
+      - name: Wheel ships the persona library
+        run: python -c "import sys, zipfile, glob; n = zipfile.ZipFile(glob.glob('dist/*.whl')[0]).namelist(); sys.exit(0 if 'moodsona/personas/schema.json' in n else 'schema.json missing from wheel')"
+
+  zizmor:
+    name: zizmor (GitHub Actions static analysis)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: zizmorcore/zizmor-action@85b2b9fb8e3325e7a23d7d0a9d7ba5ae0f999e3e # v0.7.1
+        with:
+          # Plain failing check instead of SARIF upload: works on fork PRs,
+          # needs no security-events permission.
+          advanced-security: false
+          annotations: true
+
+  audit:
+    # Dependency vulnerability scan. Deliberately NOT part of `ci-ok`: a CVE
+    # published upstream should not block unrelated PRs. Dependabot security
+    # updates fix it; this job makes it visible on main and in PRs.
+    name: audit (pip-audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - name: Export runtime + provider dependencies (with hashes)
+        run: uv export --locked --no-emit-project --extra anthropic --extra openai --format requirements.txt -o requirements-audit.txt
+      - run: uvx pip-audit@2.10.1 --strict --disable-pip --require-hashes -r requirements-audit.txt
+
+  ci-ok:
+    # Single required check for the ruleset, so the matrix can change without
+    # editing branch protection. Fails if any needed job failed or was cancelled.
+    name: ci-ok
+    if: ${{ always() }}
+    needs: [lint, typecheck, test, personas, build, zizmor]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: All required jobs passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "job results: $RESULTS"
+          for r in $RESULTS; do
+            if [ "$r" != "success" ]; then
+              echo "::error::a required CI job finished with '$r'"
+              exit 1
+            fi
+          done

@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/moodsona/moodsona/blob/main/personas/schema.json",
+  "title": "moodsona persona",
+  "description": "One simulated user persona. Persona files are data, licensed CC-BY-4.0, and must describe fictional people only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "display_name",
+    "language",
+    "hidden_goal",
+    "reaction_rules",
+    "initial_state",
+    "baseline",
+    "memory_days_visible",
+    "tags",
+    "license",
+    "author",
+    "ai_assisted"
+  ],
+  "properties": {
+    "id": {
+      "description": "Stable kebab-case identifier. Must equal the file name without .yaml.",
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "minLength": 3,
+      "maxLength": 64
+    },
+    "display_name": {
+      "description": "Short human-readable name shown in reports, e.g. 'Anxious newcomer'.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "description": {
+      "description": "Optional one-paragraph summary for the persona catalog.",
+      "type": "string",
+      "maxLength": 600
+    },
+    "language": {
+      "description": "Language the persona writes in. Only English is supported in v0.1.",
+      "type": "string",
+      "enum": ["en"]
+    },
+    "pronouns": {
+      "description": "Pronouns the simulator uses for the persona in its prompts. Optional; defaults to 'they/them'.",
+      "type": "string",
+      "enum": ["she/her", "he/him", "they/them"]
+    },
+    "hidden_goal": {
+      "description": "What the simulated user actually wants from the conversation. Never revealed to the bot under test.",
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 500
+    },
+    "reaction_rules": {
+      "description": "Ordered rules: when the bot does X, the persona reacts with Y and its state shifts.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": { "$ref": "#/$defs/reaction_rule" }
+    },
+    "initial_state": {
+      "description": "Emotional state at the start of the first simulated session.",
+      "$ref": "#/$defs/state"
+    },
+    "baseline": {
+      "description": "Resting state the persona drifts back to between sessions.",
+      "$ref": "#/$defs/state"
+    },
+    "memory_days_visible": {
+      "description": "How many days of earlier conversation history the persona can recall (0 = no memory between sessions).",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 365
+    },
+    "tags": {
+      "description": "Lowercase kebab-case tags for filtering, e.g. 'anxiety', 'onboarding'.",
+      "type": "array",
+      "maxItems": 12,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+        "maxLength": 32
+      }
+    },
+    "license": {
+      "description": "Persona files are published under CC BY 4.0. No other value is accepted.",
+      "const": "CC-BY-4.0"
+    },
+    "author": {
+      "description": "Credit line for CC BY attribution: a name and/or GitHub handle, e.g. 'Jane Doe (@janedoe)'.",
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 100
+    },
+    "ai_assisted": {
+      "description": "true if an AI tool drafted or substantially edited this persona (see CONTRIBUTING.md).",
+      "type": "boolean"
+    }
+  },
+  "$defs": {
+    "stance": {
+      "description": "Overall attitude toward the bot under test.",
+      "type": "string",
+      "enum": ["open", "curious", "guarded", "skeptical", "withdrawn", "hostile"]
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["emotion", "energy", "stance"],
+      "properties": {
+        "emotion": {
+          "description": "Valence on a 0-100 scale: 0 = very distressed, 50 = neutral, 100 = very positive.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "energy": {
+          "description": "Engagement on a 0-100 scale: 0 = about to leave, 100 = highly engaged.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "stance": { "$ref": "#/$defs/stance" }
+      }
+    },
+    "reaction_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["when", "then"],
+      "properties": {
+        "when": {
+          "description": "Observable bot behaviour that triggers the rule.",
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 300
+        },
+        "then": {
+          "description": "How the persona responds (tone, length, what it says or withholds).",
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 300
+        },
+        "emotion_delta": {
+          "type": "integer",
+          "minimum": -50,
+          "maximum": 50
+        },
+        "energy_delta": {
+          "type": "integer",
+          "minimum": -50,
+          "maximum": 50
+        },
+        "stance_to": { "$ref": "#/$defs/stance" }
+      }
+    }
+  }
+}

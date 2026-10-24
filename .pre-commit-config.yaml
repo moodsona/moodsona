@@ -1,0 +1,91 @@
+# Install once:  uv run pre-commit install
+# (installs both the pre-commit and the commit-msg hooks, see default_install_hook_types)
+# Run on everything:  uv run pre-commit run --all-files
+# Hook revisions are bumped by Dependabot (package-ecosystem: pre-commit).
+default_install_hook_types: [pre-commit, commit-msg]
+default_stages: [pre-commit]
+minimum_pre_commit_version: "4.0.0"
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-illegal-windows-names
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.1
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # mypy runs from the project environment (uv), so it sees the real
+  # dependencies and the same version as CI. Requires `uv sync --extra dev`.
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy (strict)
+        entry: uv run --frozen mypy
+        language: system
+        types_or: [python, pyi]
+        pass_filenames: false
+        require_serial: true
+
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.51.1
+    hooks:
+      - id: typos
+
+  - repo: https://github.com/python-jsonschema/check-jsonschema
+    rev: 0.38.2
+    hooks:
+      # Every persona file must match the persona schema.
+      - id: check-jsonschema
+        name: validate personas against personas/schema.json
+        files: ^personas/.*\.ya?ml$
+        args: [--schemafile, personas/schema.json]
+      # The schema itself must be a valid JSON Schema.
+      - id: check-metaschema
+        files: ^personas/schema\.json$
+      - id: check-github-workflows
+      - id: check-github-issue-forms
+      - id: check-dependabot
+
+  - repo: local
+    hooks:
+      - id: persona-cross-checks
+        name: persona cross-file checks (ids, file names, no contact data)
+        entry: uv run --frozen python tools/validate_personas.py
+        language: system
+        files: ^personas/.*\.ya?ml$
+
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: v1.31.1
+    hooks:
+      - id: zizmor
+
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.13.5
+    hooks:
+      - id: uv-lock
+
+  # Local commit messages follow Conventional Commits too. On GitHub only the
+  # PR title is enforced (PRs are squash-merged), see .github/workflows/pr-title.yml.
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: [--strict, feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert, persona]

@@ -1,0 +1,11 @@
+moodsona
+Copyright 2026 The moodsona Authors
+
+This product includes software developed by the moodsona project
+(https://github.com/moodsona/moodsona), licensed under the Apache License,
+Version 2.0.
+
+Persona definitions under personas/ (except personas/schema.json) and
+documentation under docs/ are licensed under the Creative Commons Attribution
+4.0 International License (CC BY 4.0). See LICENSE-DATA.md. Individual persona
+authors are credited in the `author` field of each persona file.
