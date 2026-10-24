@@ -206,8 +206,6 @@ def _report(args: argparse.Namespace) -> int:
 
 
 def _bench(args: argparse.Namespace) -> int:
-    from moodsona.metrics import format_share
-
     err, out = sys.stderr, sys.stdout
     try:
         personas = bench.load_personas(args.persona)
@@ -225,57 +223,29 @@ def _bench(args: argparse.Namespace) -> int:
             "Add --yes to run it.\n"
         )
         return 2
-    try:  # read earlier results first: a bad file must not fail the report after paying
-        earlier = {r.path: r for r in bench.collect_runs(args.out)}
-    except (OSError, ValueError) as exc:
-        err.write(f"{exc}\nFix or move that file before running the bench.\n")
-        return 1
     try:
         provider = bench.make_provider(args.provider, args.model)
-    except LLMError as exc:  # e.g. the SDK is not installed
-        err.write(f"{exc}\n")
-        return 1
-    label = "fake"
-    if args.provider != "fake":
-        label = bench.safe_label(f"{args.provider}-{getattr(provider, 'model', args.model)}")
-    failed = False
-    for seed in personas:
-        kept = earlier.get(bench.run_path(args.out, label, seed.id, args.seed))
-        if (
-            args.skip_existing
-            and kept
-            and (kept.days, kept.turns_per_day) == (args.days, args.turns)
-        ):
-            out.write(f"{label} / {seed.id}: kept {kept.path}\n")
-            continue
-        try:
-            result = bench.run_one(
-                seed,
-                provider,
-                model=label,
-                out_dir=args.out,
-                days=args.days,
-                turns_per_day=args.turns,
-                rng_seed=args.seed,
-            )
-        except (LookupError, LLMError, OSError) as exc:
-            err.write(f"{label} / {seed.id}: {exc}\n")
-            failed = True
-            break
-        polluted = format_share(result.metrics.polluted_share)
-        out.write(
-            f"{label} / {seed.id}: {result.metrics.turns} turn(s), {polluted} polluted, "
-            f"{result.path}\n"
+        report = bench.run_bench(
+            personas,
+            provider,
+            model=bench.model_label(args.provider, provider),
+            out_dir=args.out,
+            days=args.days,
+            turns_per_day=args.turns,
+            rng_seed=args.seed,
+            skip_existing=args.skip_existing,
+            progress=lambda line: out.write(f"{line}\n"),
         )
-    try:
-        report = bench.write_report(args.out)
-    except (OSError, ValueError) as exc:
+    except bench.BenchRunError as exc:
+        err.write(f"{exc}\n")
+        if exc.report is not None:
+            out.write(f"wrote {exc.report}\n")
+        err.write("Stopped at the first failure; rerun with --skip-existing to resume.\n")
+        return 1
+    except (LLMError, OSError, ValueError) as exc:  # LLMError: e.g. the SDK is not installed
         err.write(f"{exc}\n")
         return 1
     out.write(f"wrote {report}\n")
-    if failed:
-        err.write("Stopped at the first failure; rerun with --skip-existing to resume.\n")
-        return 1
     return 0
 
 

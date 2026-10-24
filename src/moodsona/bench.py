@@ -21,14 +21,15 @@ run costs money (see :func:`max_model_calls`).
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
+from statistics import fmean
 
 from moodsona.companion import ScriptedCompanion
 from moodsona.llm.anthropic import AnthropicProvider
-from moodsona.llm.base import LLMProvider
+from moodsona.llm.base import LLMError, LLMProvider
 from moodsona.llm.fake import FakeProvider
 from moodsona.llm.openai import OpenAIProvider
 from moodsona.metrics import TranscriptMetrics, compute_metrics, format_number, format_share
@@ -41,12 +42,14 @@ __all__ = [
     "BENCH_COMPANION_LINES",
     "PROVIDERS",
     "BenchRun",
+    "BenchRunError",
     "bench_companion",
     "collect_runs",
     "load_personas",
     "make_provider",
     "max_model_calls",
-    "mean_or_none",
+    "model_label",
+    "run_bench",
     "run_one",
     "run_path",
     "safe_label",
@@ -195,14 +198,18 @@ def run_one(
     path.parent.mkdir(parents=True, exist_ok=True)
     transcript = run(persona, provider, bench_companion(), days, turns_per_day, rng_seed)
     transcript.to_jsonl(path)
-    metrics = compute_metrics(transcript, language=persona.language)
-    return BenchRun(model, path, days, turns_per_day, metrics)
+    return _scored(model, path, transcript, persona.language)
 
 
-def mean_or_none(values: Sequence[float | None]) -> float | None:
+def _scored(model: str, path: Path, transcript: Transcript, language: str) -> BenchRun:
+    metrics = compute_metrics(transcript, language=language)
+    return BenchRun(model, path, transcript.days, transcript.turns_per_day, metrics)
+
+
+def _mean_or_none(values: Sequence[float | None]) -> float | None:
     """Mean of the values that are not None; None when there are none."""
     present = [v for v in values if v is not None]
-    return sum(present) / len(present) if present else None
+    return fmean(present) if present else None
 
 
 _Column = tuple[str, Callable[[TranscriptMetrics], float | None], Callable[[float | None], str]]
@@ -223,7 +230,7 @@ _COLUMNS: tuple[_Column, ...] = (
     ("energy drift/day", lambda m: m.energy.drift_per_day, lambda v: format_number(v, "+.1f")),
     ("energy volatility", lambda m: m.energy.volatility, format_number),
     ("stance changes/day", lambda m: m.stance_changes_per_day, lambda v: format_number(v, ".2f")),
-    ("days skipped", lambda m: float(m.days_skipped), format_number),
+    ("days skipped", lambda m: m.days_skipped, format_number),
 )
 
 
@@ -255,31 +262,30 @@ def collect_runs(out_dir: str | PathLike[str]) -> list[BenchRun]:
     for path in paths:
         transcript = Transcript.from_jsonl(path)
         language = languages.get(transcript.persona_id, "en")
-        metrics = compute_metrics(transcript, language=language)
-        runs.append(
-            BenchRun(path.parent.name, path, transcript.days, transcript.turns_per_day, metrics)
-        )
+        runs.append(_scored(path.parent.name, path, transcript, language))
     return runs
 
 
-def write_report(out_dir: str | PathLike[str]) -> Path:
-    """Write ``bench.md`` for every transcript in ``<out_dir>/<model>/``.
+def write_report(out_dir: str | PathLike[str], runs: Iterable[BenchRun] | None = None) -> Path:
+    """Write ``<out_dir>/bench.md``.
 
     Runs are averaged per model and run length (days x turns per day), so runs
     of different lengths are never mixed in one row.
 
     Args:
         out_dir: The bench directory.
+        runs: The runs to report; None reads every transcript in
+            ``<out_dir>/<model>/`` (see :func:`collect_runs`).
 
     Returns:
         The path of ``bench.md``.
 
     Raises:
-        ValueError: No transcripts found, or a file is not a transcript.
+        ValueError: No runs, or a file is not a transcript.
         OSError: A file cannot be read or written.
     """
     folder = Path(out_dir)
-    runs = collect_runs(folder)
+    runs = sorted(collect_runs(folder) if runs is None else runs, key=lambda r: r.path)
     if not runs:
         raise ValueError(f"{folder}: no bench runs (expected <model>/<persona>-seed<n>.jsonl)")
     groups: dict[tuple[str, str], list[BenchRun]] = {}
@@ -287,7 +293,7 @@ def write_report(out_dir: str | PathLike[str]) -> Path:
         groups.setdefault((r.model, r.setting), []).append(r)
     summary = []
     for (model, setting), mine in sorted(groups.items()):
-        cells = [fmt(mean_or_none([get(r.metrics) for r in mine])) for _, get, fmt in _COLUMNS]
+        cells = [fmt(_mean_or_none([get(r.metrics) for r in mine])) for _, get, fmt in _COLUMNS]
         summary.append([model, setting, str(len(mine)), *cells])
     per_run = [
         [r.model, r.metrics.persona_id, r.setting, str(r.metrics.rng_seed), str(r.metrics.turns)]
@@ -315,3 +321,96 @@ def write_report(out_dir: str | PathLike[str]) -> Path:
     path = folder / REPORT_NAME
     path.write_text("\n".join(lines), encoding="utf-8")
     return path
+
+
+def model_label(name: str, provider: LLMProvider) -> str:
+    """The model label for a provider: ``"fake"``, or ``"<name>-<model id>"`` made safe.
+
+    Args:
+        name: The provider name (one of :data:`PROVIDERS`).
+        provider: The provider :func:`make_provider` returned.
+    """
+    if name == "fake":
+        return "fake"
+    return safe_label(f"{name}-{getattr(provider, 'model', 'default')}")
+
+
+class BenchRunError(Exception):
+    """A bench run failed; the runs before it are kept and reported.
+
+    Attributes:
+        report: The ``bench.md`` written for the finished runs; None when
+            there were none.
+    """
+
+    def __init__(self, message: str, report: Path | None) -> None:
+        """Create the error with its message and the report that was written."""
+        super().__init__(message)
+        self.report = report
+
+
+def run_bench(
+    personas: Sequence[PersonaSeed],
+    provider: LLMProvider,
+    *,
+    model: str,
+    out_dir: str | PathLike[str],
+    days: int,
+    turns_per_day: int,
+    rng_seed: int = 0,
+    skip_existing: bool = False,
+    progress: Callable[[str], object] | None = None,
+) -> Path:
+    """Run every persona with one user model and write ``bench.md``.
+
+    The results already in ``out_dir`` are read before the first model call,
+    so a bad file there fails the bench before anything is paid for. The
+    bench stops at the first failed run, after writing ``bench.md`` for the
+    finished ones; rerun with ``skip_existing`` to resume.
+
+    Args:
+        personas: The personas to run.
+        provider: The user model.
+        model: Model label (see :func:`model_label`).
+        out_dir: The bench directory.
+        days: Simulated days per run.
+        turns_per_day: Maximum persona messages per day.
+        rng_seed: The random seed of every run.
+        skip_existing: Keep a run already in ``out_dir`` instead of running
+            it again, when it has the same days and turns per day.
+        progress: Called with one line per persona.
+
+    Returns:
+        The path of ``bench.md``.
+
+    Raises:
+        BenchRunError: A run failed (the provider, the language profile, or
+            writing its transcript).
+        ValueError: A file in ``out_dir`` is not a transcript.
+        OSError: A file cannot be read or written.
+    """
+    say = progress or (lambda _: None)
+    runs = {r.path: r for r in collect_runs(out_dir)}
+    for persona in personas:
+        kept = runs.get(run_path(out_dir, model, persona.id, rng_seed)) if skip_existing else None
+        if kept and (kept.days, kept.turns_per_day) == (days, turns_per_day):
+            say(f"{model} / {persona.id}: kept {kept.path}")
+            continue
+        try:
+            result = run_one(
+                persona,
+                provider,
+                model=model,
+                out_dir=out_dir,
+                days=days,
+                turns_per_day=turns_per_day,
+                rng_seed=rng_seed,
+            )
+        except (LookupError, LLMError, OSError) as exc:
+            report = write_report(out_dir, runs.values()) if runs else None
+            raise BenchRunError(f"{model} / {persona.id}: {exc}", report) from exc
+        runs[result.path] = result
+        polluted = format_share(result.metrics.polluted_share)
+        turns = result.metrics.turns
+        say(f"{model} / {persona.id}: {turns} turn(s), {polluted} polluted, {result.path}")
+    return write_report(out_dir, runs.values())

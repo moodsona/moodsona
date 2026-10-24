@@ -10,12 +10,37 @@ from hypothesis import strategies as st
 
 from moodsona import bench
 from moodsona.cli import main
-from moodsona.llm.base import ChatMessage, LLMConfigurationError, LLMError, LLMResponse
-from moodsona.llm.fake import FakeProvider
+from moodsona.llm.base import ChatMessage, LLMConfigurationError, LLMError
+from moodsona.llm.fake import FakeProvider, plumbing_reply
 from moodsona.metrics import TranscriptMetrics, compute_metrics, metrics_from_jsonl
 from moodsona.personas import list_bundled_personas, load_bundled_persona
 from moodsona.runner import Transcript
 from moodsona.state import PersonaSeed
+
+
+def _run(
+    tmp_path: Path, model: str, persona_id: str, *, days: int = 1, turns: int = 2
+) -> bench.BenchRun:
+    persona = load_bundled_persona(persona_id)
+    return bench.run_one(
+        persona, FakeProvider(), model=model, out_dir=tmp_path, days=days, turns_per_day=turns
+    )
+
+
+def _raising(error: BaseException) -> FakeProvider:
+    """A provider whose every call raises ``error``."""
+
+    def fail(messages: Sequence[ChatMessage]) -> str:
+        raise error
+
+    return FakeProvider(fail)
+
+
+def _forbid_make_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden(name: str, model: str | None) -> FakeProvider:
+        raise AssertionError("no provider may be created")
+
+    monkeypatch.setattr(bench, "make_provider", forbidden)
 
 
 def test_run_one_writes_a_readable_transcript(tmp_path: Path) -> None:
@@ -40,14 +65,7 @@ def test_the_bench_companion_is_fixed_and_cycles() -> None:
 def test_write_report_compares_models(tmp_path: Path) -> None:
     for model in ("model-a", "model-b"):
         for persona_id in ("anxious-newcomer", "boundary-tester"):
-            bench.run_one(
-                load_bundled_persona(persona_id),
-                FakeProvider(),
-                model=model,
-                out_dir=tmp_path,
-                days=1,
-                turns_per_day=2,
-            )
+            _run(tmp_path, model, persona_id)
     (tmp_path / "notes.txt").write_text("ignored", encoding="utf-8")
     path = bench.write_report(tmp_path)
     assert path == tmp_path / "bench.md"
@@ -71,7 +89,7 @@ def test_write_report_needs_runs(tmp_path: Path) -> None:
 @given(st.lists(st.one_of(st.none(), st.floats(min_value=-100, max_value=100)), max_size=10))
 def test_mean_of_runs_ignores_missing_values(values: list[float | None]) -> None:
     present = [v for v in values if v is not None]
-    result = bench.mean_or_none(values)
+    result = bench._mean_or_none(values)
     if not present:
         assert result is None
     else:
@@ -119,10 +137,7 @@ def test_paid_providers_need_yes_and_never_start_without_it(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def forbidden(name: str, model: str | None) -> FakeProvider:
-        raise AssertionError("no provider may be created without --yes")
-
-    monkeypatch.setattr(bench, "make_provider", forbidden)
+    _forbid_make_provider(monkeypatch)
     assert main(["bench", "--provider", provider, "--out", str(tmp_path)]) == 2
     err = capsys.readouterr().err
     assert "costs money" in err
@@ -190,10 +205,8 @@ def test_bench_cli_checks_earlier_results_before_spending(
     (tmp_path / "other-model").mkdir()
     (tmp_path / "other-model" / "broken.jsonl").write_text("nope\n", encoding="utf-8")
 
-    def forbidden(name: str, model: str | None) -> FakeProvider:
-        raise AssertionError("no provider may be created while the results are unreadable")
-
-    monkeypatch.setattr(bench, "make_provider", forbidden)
+    no_calls = _raising(AssertionError("no model call while the results are unreadable"))
+    monkeypatch.setattr(bench, "make_provider", lambda name, model: no_calls)
     args = ["bench", "--provider", "openai", "--yes", "--persona", "anxious-newcomer"]
     assert main([*args, "--out", str(tmp_path)]) == 1
     assert "broken.jsonl:1" in capsys.readouterr().err
@@ -201,19 +214,13 @@ def test_bench_cli_checks_earlier_results_before_spending(
 
 
 def test_run_one_creates_its_folder_before_the_first_model_call(tmp_path: Path) -> None:
-    class Checking(FakeProvider):
-        def complete(
-            self,
-            messages: Sequence[ChatMessage],
-            *,
-            temperature: float | None = None,
-            max_tokens: int | None = None,
-        ) -> LLMResponse:
-            assert (tmp_path / "fake").is_dir()
-            return super().complete(messages, temperature=temperature, max_tokens=max_tokens)
+    def checking(messages: Sequence[ChatMessage]) -> str:
+        assert (tmp_path / "fake").is_dir()
+        return plumbing_reply(messages)
 
     persona = load_bundled_persona("anxious-newcomer")
-    bench.run_one(persona, Checking(), model="fake", out_dir=tmp_path, days=1, turns_per_day=1)
+    provider = FakeProvider(checking)
+    bench.run_one(persona, provider, model="fake", out_dir=tmp_path, days=1, turns_per_day=1)
 
 
 def test_run_one_scores_in_the_persona_language(
@@ -233,18 +240,38 @@ def test_run_one_scores_in_the_persona_language(
 
 def test_write_report_keeps_different_settings_apart(tmp_path: Path) -> None:
     for persona_id, days in (("anxious-newcomer", 1), ("boundary-tester", 2)):
-        bench.run_one(
-            load_bundled_persona(persona_id),
-            FakeProvider(),
-            model="model-a",
-            out_dir=tmp_path,
-            days=days,
-            turns_per_day=1,
-        )
+        _run(tmp_path, "model-a", persona_id, days=days, turns=1)
     text = bench.write_report(tmp_path).read_text(encoding="utf-8")
     assert "| model-a | 1 x 1 | 1 |" in text
     assert "| model-a | 2 x 1 | 1 |" in text
     assert "| model-a | anxious-newcomer | 1 x 1 | 0 |" in text
+
+
+def test_write_report_uses_the_runs_it_is_given(tmp_path: Path) -> None:
+    run = _run(tmp_path, "model-a", "anxious-newcomer")
+    (tmp_path / "other").mkdir()
+    (tmp_path / "other" / "broken.jsonl").write_text("not read\n", encoding="utf-8")
+    text = bench.write_report(tmp_path, [run]).read_text(encoding="utf-8")
+    assert "| model-a | anxious-newcomer |" in text
+
+
+def test_run_bench_keeps_and_reports_the_finished_runs_when_one_fails(tmp_path: Path) -> None:
+    personas = bench.load_personas(["anxious-newcomer"])
+    kwargs: dict[str, Any] = {"model": "m", "out_dir": tmp_path, "days": 1, "turns_per_day": 1}
+    with pytest.raises(bench.BenchRunError, match="m / anxious-newcomer: quota") as info:
+        bench.run_bench(personas, _raising(LLMError("quota exceeded")), **kwargs)
+    assert info.value.report is None  # nothing finished, so there is nothing to report
+    assert isinstance(info.value.__cause__, LLMError)
+    _run(tmp_path, "m", "boundary-tester")
+    with pytest.raises(bench.BenchRunError) as info:
+        bench.run_bench(personas, _raising(LLMError("quota exceeded")), **kwargs)
+    assert info.value.report == tmp_path / "bench.md"
+    assert "boundary-tester" in info.value.report.read_text(encoding="utf-8")
+
+
+def test_model_labels() -> None:
+    assert bench.model_label("fake", FakeProvider()) == "fake"
+    assert bench.model_label("openai", Recorder()) == "openai-test-model-v1"
 
 
 def _failing_after(first: int, monkeypatch: pytest.MonkeyPatch) -> list[str]:
@@ -305,17 +332,8 @@ def test_bench_cli_errors(
         main(["bench", "--days", "0"])
     assert info.value.code == 2
 
-    class Broken(FakeProvider):
-        def complete(
-            self,
-            messages: Sequence[ChatMessage],
-            *,
-            temperature: float | None = None,
-            max_tokens: int | None = None,
-        ) -> LLMResponse:
-            raise LLMError("quota exceeded")
-
-    monkeypatch.setattr(bench, "make_provider", lambda name, model: Broken())
+    broken = _raising(LLMError("quota exceeded"))
+    monkeypatch.setattr(bench, "make_provider", lambda name, model: broken)
     args = ["bench", "--persona", "anxious-newcomer", "--days", "1", "--out", str(tmp_path)]
     assert main(args) == 1
     assert "quota exceeded" in capsys.readouterr().err
