@@ -1,9 +1,11 @@
 """EXPERIMENTAL fidelity check: can a classifier tell simulated users from real ones?
 
 This is a first cut and its API may change. It is a statistical screen, not
-proof of realism. A result near chance says only that one small classifier,
-looking at a handful of surface features, could not separate the two sets; it
-says nothing about meaning, safety or emotional realism.
+proof of realism. A result near chance means only that one small classifier,
+looking at a handful of surface features, found no evidence of a difference;
+with little data that is expected even when the sets differ. It says nothing
+about meaning, safety or emotional realism. docs/METHOD.md explains how to
+read the result.
 
 The test is a classifier two-sample test. You give it two sets of
 conversations: a *reference* set (your own real, consented data; moodsona
@@ -11,30 +13,44 @@ ships none) and a *simulated* set. Each conversation is a sequence of
 :class:`~moodsona.llm.base.ChatMessage` in the visible-history convention
 (``"user"`` is the person, ``"assistant"`` the companion), exactly what
 :meth:`moodsona.runner.Transcript.visible_history` returns. Every user message
-becomes one example, described by :data:`FEATURE_NAMES`. A logistic regression
-is trained to tell the sets apart and scored on held-out conversations:
+becomes one example, described by :data:`FEATURE_NAMES` (or a subset). A
+logistic regression is trained to tell the sets apart and scored on held-out
+data:
 
-- **Grouped k-fold.** All messages of one conversation are in the same fold,
-  so the classifier is never tested on a conversation it partly trained on.
-  Folds are stratified: each fold holds conversations from both sets.
-- **Balanced accuracy.** The score is the mean of the per-set recall on
-  held-out messages, so 0.5 means "no better than chance" even when the sets
-  have different sizes (always guessing the larger set scores 0.5, not its
-  share of the data). Training weights each set equally for the same reason.
-- **Permutation p-value.** The set labels are shuffled between conversations
-  (keeping each set's number of conversations) and the whole cross-validation
-  is rerun ``n_permutations`` times. The p-value is
-  ``(1 + #{permuted accuracy >= observed}) / (1 + n_permutations)``.
+- **Groups, usually speakers.** Conversations by the same person (or the same
+  persona across seeds) share a style, so they are not independent. Pass one
+  group id per conversation (``reference_groups``, ``simulated_groups``);
+  without ids every conversation is its own group. Folds and permutations
+  work on whole groups. Without speaker ids the p-value is too optimistic
+  whenever a speaker has several conversations.
+- **Grouped k-fold.** All messages of one group are in the same fold, so the
+  classifier is never tested on a group it trained on. Folds are stratified:
+  each fold holds groups from both sets.
+- **Balanced accuracy per message.** The score is the recall on held-out
+  messages of each set, averaged over the two sets, so 0.5 is chance even
+  when the sets have different sizes. Long conversations count more than
+  short ones. Training weights each set equally for the same reason.
+- **Permutation p-value.** The set labels are shuffled between groups
+  (keeping each set's number of groups) and the whole cross-validation is
+  rerun ``n_permutations`` times. The p-value is
+  ``(1 + #{permuted accuracy >= observed}) / (1 + n_permutations)``, so it
+  cannot go below ``1 / (1 + n_permutations)``.
+
+``overlap_with_companion`` depends on the companion's words, so both sets
+should come from the same or a comparable companion; otherwise leave it out
+with ``features=``.
 
 Everything is seeded: the same inputs and seed give the same result. The cost
-grows with permutations x folds x messages; a few thousand messages with the
-default 200 permutations take minutes in pure Python.
+grows with permutations x folds x messages: about 1,600 messages take about
+two minutes with the default 100 permutations, in pure Python.
 
 Example::
 
     from moodsona.fidelity import classifier_two_sample_test
 
-    result = classifier_two_sample_test(my_real_conversations, simulated, seed=0)
+    result = classifier_two_sample_test(
+        my_conversations, simulated, reference_groups=my_speakers, simulated_groups=personas
+    )
     print(result.accuracy, result.p_value, result.weights)
 """
 
@@ -50,8 +66,6 @@ from operator import mul
 from types import MappingProxyType
 from typing import Any
 
-from moodsona.checks import words
-from moodsona.lang.english import _straight_apostrophes
 from moodsona.llm.base import ChatMessage
 
 #: Names of the per-message features, in the order :func:`message_features` returns them.
@@ -68,6 +82,8 @@ FEATURE_NAMES = (
 
 # A word: letters or digits, with inner apostrophes kept ("i'm", "don't").
 _TOKEN = re.compile(r"[^\W_]+(?:'[^\W_]+)*")
+# Apostrophe look-alikes from phone keyboards and models, read as "'".
+_APOSTROPHES = str.maketrans(dict.fromkeys("\u2019\u2018\u02bc`", "'"))
 # First-person singular English forms. "id" and "ill" are left out on purpose:
 # they are ordinary words more often than they are "I'd" and "I'll".
 _FIRST_PERSON = frozenset(
@@ -84,10 +100,12 @@ _EMOJI_RANGES = ((0x2600, 0x27BF), (0x2B00, 0x2BFF), (0x1F000, 0x1FAFF))
 _ITERATIONS = 200
 _LEARNING_RATE = 0.5
 _L2 = 0.01
+# Permuted accuracies this close to the observed one count as ties.
+_TIE = 1e-12
 
 
 def _tokens(text: str) -> list[str]:
-    return _TOKEN.findall(_straight_apostrophes(text).lower())
+    return _TOKEN.findall(text.translate(_APOSTROPHES).lower())
 
 
 def _is_emoji(char: str) -> bool:
@@ -112,12 +130,12 @@ def message_features(text: str, previous_companion: str = "") -> tuple[float, ..
     - ``first_person_share``: share of words that are English first-person
       singular forms (``i``, ``me``, ``my``, ``mine``, ``myself``, ``i'm``,
       ``im``, ``i've``, ``ive``, ``i'd``, ``i'll``), 0-1.
-    - ``overlap_with_companion``: Jaccard index of the lower-cased word sets
-      (:func:`moodsona.checks.words`, the simulator's own repeat measure) of
-      the message and ``previous_companion``, 0-1 (0 when either is empty).
+    - ``overlap_with_companion``: Jaccard index of the word sets of the
+      message and ``previous_companion``, 0-1 (0 when either has no words).
+      It depends on the companion as much as on the user.
 
-    For the ratio and the first-person share, words are runs of letters and
-    digits with inner apostrophes kept (curly and straight alike).
+    Words are lower-cased runs of letters and digits with inner apostrophes
+    kept; curly apostrophes count as straight ones, so "I'm" is one word.
 
     Args:
         text: The user message.
@@ -129,7 +147,7 @@ def message_features(text: str, previous_companion: str = "") -> tuple[float, ..
     chars = len(text)
     tokens = _tokens(text)
     first_letter = next((c for c in text if c.isalpha()), "")
-    mine, theirs = words(text), words(previous_companion)
+    mine, theirs = set(tokens), set(_tokens(previous_companion))
     union = mine | theirs
     return (
         math.log1p(chars),
@@ -137,7 +155,7 @@ def message_features(text: str, previous_companion: str = "") -> tuple[float, ..
         float(text.count("?")),
         float(first_letter.islower()),
         float(any(_is_emoji(c) for c in text)),
-        len(set(tokens)) / len(tokens) if tokens else 0.0,
+        len(mine) / len(tokens) if tokens else 0.0,
         sum(t in _FIRST_PERSON for t in tokens) / len(tokens) if tokens else 0.0,
         len(mine & theirs) / len(union) if mine and theirs else 0.0,
     )
@@ -170,10 +188,11 @@ def grouped_folds(
 ) -> list[int]:
     """Assign items to cross-validation folds, keeping each group together.
 
-    Groups (conversations) are shuffled within each label and dealt round-robin
-    into the folds, so every fold gets at least one group of every label. The
-    shuffle of one label depends only on ``seed`` and that label's number of
-    groups, so renaming the labels does not move any group.
+    The groups of each label are shuffled (one seeded random source for all
+    labels) and dealt round-robin into the folds; each label starts where the
+    previous one stopped. So every fold gets at least one group of every
+    label, fold sizes differ by at most one group, and the folds of one label
+    do not mirror those of the other.
 
     Args:
         groups: Group id of each item; every item of a group must share a label.
@@ -191,13 +210,16 @@ def grouped_folds(
     for group, label in zip(groups, labels, strict=True):
         if label_of.setdefault(group, label) != label:
             raise ValueError(f"group {group!r} has more than one label")
+    rng = random.Random(seed)  # noqa: S311 - statistics, not cryptography
     fold_of: dict[Hashable, int] = {}
+    start = 0
     for label in sorted(set(label_of.values())):
         members = [g for g, lab in label_of.items() if lab == label]
         if len(members) < folds:
             raise ValueError(f"label {label} needs at least {folds} groups, has {len(members)}")
-        random.Random(seed).shuffle(members)  # noqa: S311 - statistics, not cryptography
-        fold_of.update((g, i % folds) for i, g in enumerate(members))
+        rng.shuffle(members)
+        fold_of.update((g, (start + i) % folds) for i, g in enumerate(members))
+        start += len(members)
     return [fold_of[g] for g in groups]
 
 
@@ -248,20 +270,26 @@ def _fit_logistic(
 
     Each class gets half of the total sample weight, matching balanced accuracy.
     A fixed number of steps of fixed size from zero: deterministic, but not
-    necessarily converged (on very unequal or separable sets the weights would
-    keep growing with more steps).
+    converged. With very unequal set sizes or nearly separable sets it is
+    further from the optimum, and correlated features share weight in ways
+    that still change with more steps.
     """
     count = len(labels)
     positives = sum(labels)
     sample_weight = [
         count / (2 * positives) if y else count / (2 * (count - positives)) for y in labels
     ]
+    # The error s * (p - y) with p = 0.5 + 0.5 * tanh(z / 2), split into
+    # precomputed parts so the loop makes no Python call per row.
+    half = [0.5 * s for s in sample_weight]
+    shift = [s * (0.5 - y) for s, y in zip(sample_weight, labels, strict=True)]
     columns = list(zip(*rows, strict=True))
     bias, weights = 0.0, [0.0] * len(columns)
     for _ in range(_ITERATIONS):
+        half_bias, half_weights = 0.5 * bias, [0.5 * w for w in weights]
         errors = [
-            s * (_predict(bias, weights, row) - y)
-            for row, y, s in zip(rows, labels, sample_weight, strict=True)
+            h * math.tanh(half_bias + sum(map(mul, half_weights, row))) + c
+            for row, h, c in zip(rows, half, shift, strict=True)
         ]
         bias -= _LEARNING_RATE * sum(errors) / count
         weights = [
@@ -306,20 +334,24 @@ class FidelityResult:
     """Outcome of :func:`classifier_two_sample_test`.
 
     Attributes:
-        accuracy: Balanced accuracy on held-out conversations (0.5 = chance).
+        accuracy: Balanced accuracy over held-out messages: each set's recall,
+            averaged over the two sets (0.5 = chance). Per message, so long
+            conversations weigh more.
         p_value: Permutation p-value for "the sets cannot be told apart", in (0, 1].
         n_permutations: Label shuffles used for the p-value.
         folds: Number of cross-validation folds.
         seed: The random seed.
         reference_conversations: Reference conversations with at least one user message.
         simulated_conversations: Simulated conversations with at least one user message.
+        reference_groups: Groups (speakers, or conversations) in the reference set.
+        simulated_groups: Groups (speakers, or conversations) in the simulated set.
         reference_messages: User messages in the reference set.
         simulated_messages: User messages in the simulated set.
-        weights: Logistic regression weight per feature, fitted on all messages
-            with standardised features. Positive means "more typical of the
-            simulated set"; the largest absolute values show what gives the
-            simulator away. The fit has a fixed step budget, so read them as
-            a ranking, not as converged estimates. Read-only.
+        weights: Logistic regression weight per feature used, fitted on all
+            messages with standardised features. Positive means "more typical
+            of the simulated set". A rough hint at what gives the simulator
+            away, not a ranking: the fit is not converged and correlated
+            features share weight. Read-only.
     """
 
     accuracy: float
@@ -329,6 +361,8 @@ class FidelityResult:
     seed: int
     reference_conversations: int
     simulated_conversations: int
+    reference_groups: int
+    simulated_groups: int
     reference_messages: int
     simulated_messages: int
     weights: Mapping[str, float] = field(hash=False)
@@ -348,50 +382,77 @@ def classifier_two_sample_test(
     reference: Sequence[Sequence[ChatMessage]],
     simulated: Sequence[Sequence[ChatMessage]],
     *,
+    reference_groups: Sequence[Hashable] | None = None,
+    simulated_groups: Sequence[Hashable] | None = None,
+    features: Sequence[str] | None = None,
     folds: int = 5,
-    n_permutations: int = 200,
+    n_permutations: int = 100,
     seed: int = 0,
 ) -> FidelityResult:
     """Test whether a classifier can tell simulated user messages from reference ones.
 
-    EXPERIMENTAL. See the module docstring for the method and how to read it.
-    Conversations without a user message are ignored.
+    EXPERIMENTAL. See the module docstring for the method and docs/METHOD.md
+    for how to read it. Conversations without a user message are ignored.
 
     Args:
         reference: Real conversations you hold and may use (moodsona ships none).
         simulated: Simulated conversations, e.g. ``Transcript.visible_history()``.
+        reference_groups: One id per reference conversation, usually the
+            speaker. None: every conversation is its own group.
+        simulated_groups: The same for the simulated set, e.g. the persona id.
+            Ids are only compared within one set.
+        features: Names from :data:`FEATURE_NAMES` to use; None uses all.
         folds: Cross-validation folds (at least 2).
-        n_permutations: Label shuffles for the p-value (at least 1).
+        n_permutations: Label shuffles for the p-value (at least 1). The
+            smallest possible p-value is ``1 / (1 + n_permutations)``.
         seed: Seed for the folds and the shuffles.
 
     Returns:
         Balanced accuracy, p-value, sizes and per-feature weights.
 
     Raises:
-        ValueError: ``folds`` or ``n_permutations`` is too small, or a set has
-            fewer conversations with user messages than ``folds``.
+        ValueError: ``folds`` or ``n_permutations`` is too small, ``features``
+            is empty or names an unknown feature, a group list does not have
+            one id per conversation, or a set has fewer groups with user
+            messages than ``folds``.
     """
     if folds < 2:
         raise ValueError(f"folds must be at least 2, got {folds}")
     if n_permutations < 1:
         raise ValueError(f"n_permutations must be at least 1, got {n_permutations}")
+    names = tuple(dict.fromkeys(FEATURE_NAMES if features is None else features))
+    unknown = [n for n in names if n not in FEATURE_NAMES]
+    if not names or unknown:
+        raise ValueError(f"features must be names from FEATURE_NAMES; unknown: {unknown}")
+    keep = [FEATURE_NAMES.index(n) for n in names]
+
     rows: list[tuple[float, ...]] = []
-    groups: list[int] = []
-    group_labels: list[int] = []
-    for label, (name, conversations) in enumerate(
-        (("reference", reference), ("simulated", simulated))
-    ):
-        for conversation in conversations:
-            features = conversation_features(conversation)
-            if features:
-                rows += features
-                groups += [len(group_labels)] * len(features)
+    groups: list[int] = []  # group index of each message
+    group_labels: list[int] = []  # set label of each group
+    group_index: dict[tuple[int, Hashable], int] = {}
+    conversations_used = [0, 0]
+    sets = (("reference", reference, reference_groups), ("simulated", simulated, simulated_groups))
+    for label, (name, conversations, ids) in enumerate(sets):
+        if ids is not None and len(ids) != len(conversations):
+            raise ValueError(
+                f"{name}_groups needs one id per conversation: "
+                f"got {len(ids)} for {len(conversations)}"
+            )
+        keys: Sequence[Hashable] = range(len(conversations)) if ids is None else ids
+        for conversation, key in zip(conversations, keys, strict=True):
+            messages = conversation_features(conversation)
+            if not messages:
+                continue
+            group = group_index.setdefault((label, key), len(group_index))
+            if group == len(group_labels):
                 group_labels.append(label)
+            rows += [tuple(row[i] for i in keep) for row in messages]
+            groups += [group] * len(messages)
+            conversations_used[label] += 1
         used = group_labels.count(label)
         if used < folds:
             raise ValueError(
-                f"{name} has {used} conversations with user messages; "
-                f"folds={folds} needs at least {folds}"
+                f"{name} has {used} groups with user messages; folds={folds} needs at least {folds}"
             )
 
     observed = _cv_accuracy(rows, groups, group_labels, folds, seed)
@@ -400,7 +461,7 @@ def classifier_two_sample_test(
     at_least_as_good = 0
     for _ in range(n_permutations):
         rng.shuffle(shuffled)
-        if _cv_accuracy(rows, groups, shuffled, folds, seed) >= observed:
+        if _cv_accuracy(rows, groups, shuffled, folds, seed) >= observed - _TIE:
             at_least_as_good += 1
 
     message_labels = [group_labels[g] for g in groups]
@@ -412,9 +473,11 @@ def classifier_two_sample_test(
         n_permutations=n_permutations,
         folds=folds,
         seed=seed,
-        reference_conversations=group_labels.count(0),
-        simulated_conversations=group_labels.count(1),
+        reference_conversations=conversations_used[0],
+        simulated_conversations=conversations_used[1],
+        reference_groups=group_labels.count(0),
+        simulated_groups=group_labels.count(1),
         reference_messages=message_labels.count(0),
         simulated_messages=message_labels.count(1),
-        weights=MappingProxyType(dict(zip(FEATURE_NAMES, weights, strict=True))),
+        weights=MappingProxyType(dict(zip(names, weights, strict=True))),
     )

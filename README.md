@@ -118,19 +118,28 @@ consented reference conversations (moodsona ships none):
 import moodsona
 from moodsona.fidelity import classifier_two_sample_test
 
-persona = moodsona.load_bundled_persona("anxious-newcomer")
 provider = moodsona.FakeProvider()  # placeholder text: swap in a real provider
-runs = [moodsona.run(persona, provider, MyBot(), 2, 3, rng_seed=s) for s in range(10)]
-simulated = [transcript.visible_history() for transcript in runs]
-reference = load_my_conversations()  # yours: lists of moodsona.ChatMessage
-result = classifier_two_sample_test(reference, simulated, seed=0)
-print(result.accuracy, result.p_value, result.weights)  # 0.5 = cannot tell apart
+simulated, personas = [], []
+for persona_id in moodsona.list_bundled_personas():
+    persona = moodsona.load_bundled_persona(persona_id)
+    for seed in range(3):
+        transcript = moodsona.run(persona, provider, MyBot(), 2, 3, rng_seed=seed)
+        simulated.append(transcript.visible_history())
+        personas.append(persona_id)  # one speaker per persona, not per run
+reference, speakers = load_my_conversations()  # yours, with one speaker id each
+result = classifier_two_sample_test(
+    reference, simulated, reference_groups=speakers, simulated_groups=personas
+)
+print(result.accuracy, result.p_value, result.weights)
 ```
 
-With `FakeProvider` every run is the same placeholder text, so this only shows
-the wiring; use a real provider (see Quickstart) to check a real simulator.
-It is a statistical screen on eight surface features, not proof of realism;
-see [docs/METHOD.md](docs/METHOD.md#fidelity-check-experimental).
+Pass the speaker ids: conversations by the same person (or persona) are not
+independent, and without them the p-value is far too optimistic. Use the same
+companion for both sets. With `FakeProvider` every run is the same placeholder
+text, so this only shows the wiring; use a real provider (see Quickstart). It
+is a statistical screen on eight surface features, not proof of realism: a
+large p-value is no evidence that the sets are alike. See
+[docs/METHOD.md](docs/METHOD.md#fidelity-check-experimental).
 
 ## Personas
 

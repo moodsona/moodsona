@@ -10,11 +10,13 @@ import json
 import math
 import random
 from collections.abc import Callable
+from typing import Any
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from moodsona import fidelity
 from moodsona.fidelity import (
     FEATURE_NAMES,
     _fit_logistic,
@@ -66,6 +68,28 @@ def _conversations(
     line: Callable[[random.Random], str], rng: random.Random, count: int, turns: int
 ) -> list[Conversation]:
     return [_conversation([line(rng) for _ in range(turns)]) for _ in range(count)]
+
+
+def _speakers(
+    rng: random.Random, speakers: int, conversations: int
+) -> tuple[list[Conversation], list[str]]:
+    """Several conversations per speaker; each speaker has a fixed style of their own.
+
+    Both sets draw their speakers' styles from the same population, so the sets
+    differ only by which speakers they happen to contain.
+    """
+    out: list[Conversation] = []
+    ids: list[str] = []
+    for n in range(speakers):
+        length, asks, lower = rng.randint(1, 12), rng.random() < 0.5, rng.random() < 0.5
+        for _ in range(conversations):
+            lines = []
+            for _ in range(3):
+                text = " ".join(rng.choice(_FILLER + _TOPICS) for _ in range(length))
+                lines.append((text if lower else text.capitalize()) + ("?" if asks else "."))
+            out.append(_conversation(lines))
+            ids.append(f"speaker-{n}")  # the same ids in both sets: they must not collide
+    return out, ids
 
 
 # ------------------------------------------------------------- features ----
@@ -151,6 +175,13 @@ def test_overlap_is_jaccard_with_the_previous_companion_message() -> None:
     assert _feature("overlap_with_companion", "", "the cat") == 0.0
 
 
+def test_all_word_features_share_one_word_definition() -> None:
+    # "i'm" is one word everywhere: it is not the same word as "i" and "m".
+    assert _feature("overlap_with_companion", "i'm ok", "i m ok") == pytest.approx(1 / 4)
+    assert _feature("overlap_with_companion", "I" + chr(0x2019) + "m ok", "i'm OK") == 1.0
+    assert _feature("type_token_ratio", "i'm i m") == 1.0
+
+
 def test_conversation_features_pair_each_user_message_with_the_last_assistant_one() -> None:
     conversation = [
         ChatMessage("system", "red green"),
@@ -221,6 +252,24 @@ def test_grouped_folds_never_split_a_group(
         assert len({f for g, f in zip(groups, folds, strict=True) if g == gid}) == 1
     for fold in range(k):
         assert {lab for lab, f in zip(labels, folds, strict=True) if f == fold} == {0, 1}
+
+
+def test_grouped_folds_balance_fold_sizes_across_labels() -> None:
+    groups = list(range(14))
+    labels = [0] * 7 + [1] * 7
+    folds = grouped_folds(groups, labels, 5, seed=0)
+    sizes = [folds.count(f) for f in range(5)]
+    assert max(sizes) - min(sizes) <= 1
+
+
+def test_grouped_folds_shuffle_the_labels_independently() -> None:
+    groups = list(range(20))
+    labels = [0] * 10 + [1] * 10
+    paired = []
+    for seed in range(5):
+        folds = grouped_folds(groups, labels, 5, seed=seed)
+        paired.append(folds[:10] == folds[10:])  # group i of each label in the same fold
+    assert not all(paired)
 
 
 def test_grouped_folds_reject_mixed_labels_in_a_group() -> None:
@@ -336,7 +385,7 @@ def test_different_styles_are_told_apart() -> None:
     assert result.weights["log_length"] < 0
 
 
-def test_same_seed_same_result_and_swap_keeps_accuracy() -> None:
+def test_same_seed_same_result_and_swap_flips_the_weights() -> None:
     rng = random.Random(2)
     a = _conversations(_mixed_line, rng, 8, 2) + _conversations(_rambling_line, rng, 4, 2)
     b = _conversations(_mixed_line, rng, 6, 3) + _conversations(_curt_line, rng, 6, 2)
@@ -344,8 +393,76 @@ def test_same_seed_same_result_and_swap_keeps_accuracy() -> None:
     again = classifier_two_sample_test(a, b, folds=3, n_permutations=5, seed=4)
     swapped = classifier_two_sample_test(b, a, folds=3, n_permutations=5, seed=4)
     assert first == again
-    assert swapped.accuracy == pytest.approx(first.accuracy)
     assert swapped.weights["log_length"] == pytest.approx(-first.weights["log_length"])
+
+
+def test_speaker_groups_stop_style_leaking_across_folds() -> None:
+    rng = random.Random(0)  # the leak shows for every seed tried; 0 is not special
+    reference, reference_ids = _speakers(rng, 3, 5)
+    simulated, simulated_ids = _speakers(rng, 3, 5)
+    options: dict[str, Any] = {"folds": 3, "n_permutations": 19, "seed": 0}
+    per_conversation = classifier_two_sample_test(reference, simulated, **options)
+    per_speaker = classifier_two_sample_test(
+        reference,
+        simulated,
+        reference_groups=reference_ids,
+        simulated_groups=simulated_ids,
+        **options,
+    )
+    # Same population: only the per-speaker test keeps the p-value honest.
+    assert per_conversation.p_value <= 0.05
+    assert per_speaker.p_value > 0.1
+    assert (per_conversation.reference_groups, per_speaker.reference_groups) == (15, 3)
+    assert per_speaker.simulated_groups == 3
+    assert per_speaker.reference_conversations == 15
+
+
+def test_permutation_ties_survive_float_rounding(monkeypatch: pytest.MonkeyPatch) -> None:
+    scores = iter([0.8, 0.1 + 0.7, 0.0])  # 0.1 + 0.7 == 0.7999999999999999
+    monkeypatch.setattr(fidelity, "_cv_accuracy", lambda *_args: next(scores))
+    rng = random.Random(0)
+    result = classifier_two_sample_test(
+        _conversations(_mixed_line, rng, 2, 2),
+        _conversations(_mixed_line, rng, 2, 2),
+        folds=2,
+        n_permutations=2,
+    )
+    assert result.p_value == pytest.approx(2 / 3)
+
+
+def test_default_is_100_permutations(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[object] = []
+
+    def chance(*args: object) -> float:
+        calls.append(args)
+        return 0.5
+
+    monkeypatch.setattr(fidelity, "_cv_accuracy", chance)
+    rng = random.Random(0)
+    result = classifier_two_sample_test(
+        _conversations(_mixed_line, rng, 2, 2), _conversations(_mixed_line, rng, 2, 2), folds=2
+    )
+    assert result.n_permutations == 100
+    assert len(calls) == 1 + 100  # the real labels, then every shuffle
+    assert result.p_value == 1.0  # every shuffle ties with the observed 0.5
+
+
+def test_features_can_leave_out_the_companion_overlap() -> None:
+    # Same user lines; only the companion differs, and only the overlap sees it.
+    rng = random.Random(4)
+
+    def opened_by(reply: str) -> Conversation:  # the companion speaks first and every turn
+        lines = [_mixed_line(rng) for _ in range(3)]
+        return [ChatMessage("assistant", reply), *_conversation(lines, reply)]
+
+    chatty = [opened_by("what about it, was it fine?") for _ in range(10)]  # shares words
+    terse = [opened_by("Tell me more.") for _ in range(10)]  # shares none
+    without = [n for n in FEATURE_NAMES if n != "overlap_with_companion"]
+    full = classifier_two_sample_test(chatty, terse, n_permutations=9, seed=0)
+    cut = classifier_two_sample_test(chatty, terse, features=without, n_permutations=9, seed=0)
+    assert full.accuracy >= 0.8
+    assert cut.accuracy <= 0.7
+    assert list(cut.weights) == without
 
 
 def test_p_value_is_in_range() -> None:
@@ -377,11 +494,16 @@ def test_result_is_json_ready_read_only_and_hashable() -> None:
 
 def test_conversations_without_user_messages_are_ignored() -> None:
     rng = random.Random(3)
-    reference = [*_conversations(_mixed_line, rng, 2, 2), [ChatMessage("assistant", "hello?")]]
-    result = classifier_two_sample_test(
-        reference, _conversations(_curt_line, rng, 2, 2), folds=2, n_permutations=1, seed=0
-    )
+    silent: Conversation = [ChatMessage("assistant", "hello?")]
+    reference = [silent, *_conversations(_mixed_line, rng, 2, 2)]
+    simulated = _conversations(_curt_line, rng, 2, 2)
+    result = classifier_two_sample_test(reference, simulated, folds=2, n_permutations=1, seed=0)
     assert result.reference_conversations == 2
+    # The silent conversation's group id goes with it.
+    grouped = classifier_two_sample_test(
+        reference, simulated, reference_groups=["x", "a", "b"], folds=2, n_permutations=1
+    )
+    assert grouped.reference_groups == 2
 
 
 @pytest.mark.parametrize(
@@ -392,11 +514,31 @@ def test_conversations_without_user_messages_are_ignored() -> None:
         ({"folds": 4}, "reference"),
     ],
 )
-def test_invalid_arguments_are_rejected(kwargs: dict[str, int], message: str) -> None:
+def test_invalid_arguments_are_rejected(kwargs: dict[str, Any], message: str) -> None:
     rng = random.Random(0)
     with pytest.raises(ValueError, match=message):
         classifier_two_sample_test(
             _conversations(_mixed_line, rng, 3, 2), _conversations(_mixed_line, rng, 5, 2), **kwargs
+        )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"features": []}, "features"),
+        ({"features": ["log_length", "shoe_size"]}, "shoe_size"),
+        ({"reference_groups": ["a", "b"]}, "reference_groups"),
+        ({"simulated_groups": ["a"] * 6}, "simulated has 1 group"),
+    ],
+)
+def test_invalid_features_and_groups_are_rejected(kwargs: dict[str, Any], message: str) -> None:
+    rng = random.Random(0)
+    with pytest.raises(ValueError, match=message):
+        classifier_two_sample_test(
+            _conversations(_mixed_line, rng, 3, 2),
+            _conversations(_mixed_line, rng, 6, 2),
+            folds=2,
+            **kwargs,
         )
 
 
