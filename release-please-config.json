@@ -8,6 +8,9 @@
       "include-v-in-tag": true,
       "bump-minor-pre-major": true,
       "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        { "type": "toml", "path": "uv.lock", "jsonpath": "$.package[?(@.name=='moodsona')].version" }
+      ],
       "pull-request-title-pattern": "chore: release ${version}",
       "pull-request-header": "Merging this PR tags the release and publishes it to PyPI through Trusted Publishing. The notes below become the CHANGELOG.md section and the GitHub Release notes.",
       "changelog-sections": [
