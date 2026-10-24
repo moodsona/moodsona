@@ -22,7 +22,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from moodsona.bench import PROVIDERS
+from moodsona import bench
 from moodsona.companion import EchoCompanion
 from moodsona.llm.base import LLMError
 from moodsona.llm.fake import FakeProvider
@@ -68,28 +68,33 @@ def _parser() -> argparse.ArgumentParser:
     )
     report.add_argument("transcript", help="a file written by Transcript.to_jsonl")
     report.add_argument("--json", action="store_true", help="print the metrics as JSON")
-    bench = commands.add_parser(
+    bench_cmd = commands.add_parser(
         "bench",
         help="run bundled personas with one user model and write bench.md "
         "(a real provider costs money)",
     )
-    bench.add_argument(
-        "--provider", choices=PROVIDERS, default="fake", help="the user model (default: fake)"
+    bench_cmd.add_argument(
+        "--provider", choices=bench.PROVIDERS, default="fake", help="the user model (default: fake)"
     )
-    bench.add_argument("--model", help="model id for anthropic/openai (default: the adapter's)")
-    bench.add_argument(
+    bench_cmd.add_argument("--model", help="model id for anthropic/openai (default: the adapter's)")
+    bench_cmd.add_argument(
         "--persona",
         action="append",
         help="bundled persona id; repeat for several (default: all bundled personas)",
     )
-    bench.add_argument("--days", type=_positive, default=3, help="simulated days (default: 3)")
-    bench.add_argument("--turns", type=_positive, default=6, help="turns per day (default: 6)")
-    bench.add_argument("--seed", type=int, default=0, help="random seed (default: 0)")
-    bench.add_argument(
+    bench_cmd.add_argument("--days", type=_positive, default=3, help="simulated days (default: 3)")
+    bench_cmd.add_argument("--turns", type=_positive, default=6, help="turns per day (default: 6)")
+    bench_cmd.add_argument("--seed", type=int, default=0, help="random seed (default: 0)")
+    bench_cmd.add_argument(
         "--out", default="bench-results", help="output directory (default: bench-results)"
     )
-    bench.add_argument(
+    bench_cmd.add_argument(
         "--yes", action="store_true", help="confirm that a paid provider may be called"
+    )
+    bench_cmd.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="keep runs already in --out with the same days and turns (resume a failed bench)",
     )
     return parser
 
@@ -201,13 +206,11 @@ def _report(args: argparse.Namespace) -> int:
 
 
 def _bench(args: argparse.Namespace) -> int:
-    from moodsona import bench
     from moodsona.metrics import format_share
-    from moodsona.personas import list_bundled_personas, load_bundled_persona
 
     err, out = sys.stderr, sys.stdout
     try:
-        personas = [load_bundled_persona(i) for i in args.persona or list_bundled_personas()]
+        personas = bench.load_personas(args.persona)
     except KeyError as exc:
         err.write(f"{exc.args[0]}\n")
         return 2
@@ -222,6 +225,11 @@ def _bench(args: argparse.Namespace) -> int:
             "Add --yes to run it.\n"
         )
         return 2
+    try:  # read earlier results first: a bad file must not fail the report after paying
+        earlier = {r.path: r for r in bench.collect_runs(args.out)}
+    except (OSError, ValueError) as exc:
+        err.write(f"{exc}\nFix or move that file before running the bench.\n")
+        return 1
     try:
         provider = bench.make_provider(args.provider, args.model)
     except LLMError as exc:  # e.g. the SDK is not installed
@@ -230,7 +238,16 @@ def _bench(args: argparse.Namespace) -> int:
     label = "fake"
     if args.provider != "fake":
         label = bench.safe_label(f"{args.provider}-{getattr(provider, 'model', args.model)}")
+    failed = False
     for seed in personas:
+        kept = earlier.get(bench.run_path(args.out, label, seed.id, args.seed))
+        if (
+            args.skip_existing
+            and kept
+            and (kept.days, kept.turns_per_day) == (args.days, args.turns)
+        ):
+            out.write(f"{label} / {seed.id}: kept {kept.path}\n")
+            continue
         try:
             result = bench.run_one(
                 seed,
@@ -241,9 +258,10 @@ def _bench(args: argparse.Namespace) -> int:
                 turns_per_day=args.turns,
                 rng_seed=args.seed,
             )
-        except (LookupError, LLMError) as exc:
+        except (LookupError, LLMError, OSError) as exc:
             err.write(f"{label} / {seed.id}: {exc}\n")
-            return 1
+            failed = True
+            break
         polluted = format_share(result.metrics.polluted_share)
         out.write(
             f"{label} / {seed.id}: {result.metrics.turns} turn(s), {polluted} polluted, "
@@ -255,6 +273,9 @@ def _bench(args: argparse.Namespace) -> int:
         err.write(f"{exc}\n")
         return 1
     out.write(f"wrote {report}\n")
+    if failed:
+        err.write("Stopped at the first failure; rerun with --skip-existing to resume.\n")
+        return 1
     return 0
 
 

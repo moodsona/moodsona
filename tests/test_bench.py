@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 from hypothesis import given
@@ -11,9 +12,10 @@ from moodsona import bench
 from moodsona.cli import main
 from moodsona.llm.base import ChatMessage, LLMConfigurationError, LLMError, LLMResponse
 from moodsona.llm.fake import FakeProvider
-from moodsona.metrics import metrics_from_jsonl
+from moodsona.metrics import TranscriptMetrics, compute_metrics, metrics_from_jsonl
 from moodsona.personas import list_bundled_personas, load_bundled_persona
 from moodsona.runner import Transcript
+from moodsona.state import PersonaSeed
 
 
 def test_run_one_writes_a_readable_transcript(tmp_path: Path) -> None:
@@ -52,10 +54,12 @@ def test_write_report_compares_models(tmp_path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     summary = [line for line in text.splitlines() if line.startswith("| model-")]
     assert [line.split(" | ")[0] for line in summary[:2]] == ["| model-a", "| model-b"]
-    assert "| model-a | 2 |" in summary[0]  # two runs
+    assert "| model-a | 1 x 2 | 2 |" in summary[0]  # two runs of 1 day x 2 turns
     assert text.count("| model-a | anxious-newcomer |") == 1
     assert "## Per run" in text
-    header = next(line for line in text.splitlines() if line.startswith("| model | runs"))
+    header = next(
+        line for line in text.splitlines() if line.startswith("| model | days x turns | runs")
+    )
     assert len(header.split("|")) == len(summary[0].split("|"))
 
 
@@ -122,7 +126,8 @@ def test_paid_providers_need_yes_and_never_start_without_it(
     assert main(["bench", "--provider", provider, "--out", str(tmp_path)]) == 2
     err = capsys.readouterr().err
     assert "costs money" in err
-    assert "up to 420 model calls" in err  # 7 personas x 3 days x (6 turns x 3 + 2 notes)
+    calls = bench.max_model_calls(len(list_bundled_personas()), 3, 6)  # the defaults
+    assert f"up to {calls} model calls" in err
     assert not any(tmp_path.iterdir())
 
 
@@ -179,14 +184,116 @@ def test_bench_cli_fails_cleanly_on_a_broken_install(
     assert "bundled personas directory not found" in capsys.readouterr().err
 
 
-def test_bench_cli_reports_an_unreadable_result(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+def test_bench_cli_checks_earlier_results_before_spending(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (tmp_path / "other-model").mkdir()
     (tmp_path / "other-model" / "broken.jsonl").write_text("nope\n", encoding="utf-8")
-    args = ["bench", "--persona", "anxious-newcomer", "--days", "1", "--turns", "1"]
+
+    def forbidden(name: str, model: str | None) -> FakeProvider:
+        raise AssertionError("no provider may be created while the results are unreadable")
+
+    monkeypatch.setattr(bench, "make_provider", forbidden)
+    args = ["bench", "--provider", "openai", "--yes", "--persona", "anxious-newcomer"]
     assert main([*args, "--out", str(tmp_path)]) == 1
     assert "broken.jsonl:1" in capsys.readouterr().err
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["other-model"]
+
+
+def test_run_one_creates_its_folder_before_the_first_model_call(tmp_path: Path) -> None:
+    class Checking(FakeProvider):
+        def complete(
+            self,
+            messages: Sequence[ChatMessage],
+            *,
+            temperature: float | None = None,
+            max_tokens: int | None = None,
+        ) -> LLMResponse:
+            assert (tmp_path / "fake").is_dir()
+            return super().complete(messages, temperature=temperature, max_tokens=max_tokens)
+
+    persona = load_bundled_persona("anxious-newcomer")
+    bench.run_one(persona, Checking(), model="fake", out_dir=tmp_path, days=1, turns_per_day=1)
+
+
+def test_run_one_scores_in_the_persona_language(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    languages: list[object] = []
+
+    def recording(transcript: Transcript, **kwargs: Any) -> TranscriptMetrics:
+        languages.append(kwargs.get("language"))
+        return compute_metrics(transcript, **kwargs)
+
+    monkeypatch.setattr("moodsona.bench.compute_metrics", recording)
+    persona = load_bundled_persona("anxious-newcomer")
+    bench.run_one(persona, FakeProvider(), model="m", out_dir=tmp_path, days=1, turns_per_day=1)
+    assert languages == [persona.language]
+
+
+def test_write_report_keeps_different_settings_apart(tmp_path: Path) -> None:
+    for persona_id, days in (("anxious-newcomer", 1), ("boundary-tester", 2)):
+        bench.run_one(
+            load_bundled_persona(persona_id),
+            FakeProvider(),
+            model="model-a",
+            out_dir=tmp_path,
+            days=days,
+            turns_per_day=1,
+        )
+    text = bench.write_report(tmp_path).read_text(encoding="utf-8")
+    assert "| model-a | 1 x 1 | 1 |" in text
+    assert "| model-a | 2 x 1 | 1 |" in text
+    assert "| model-a | anxious-newcomer | 1 x 1 | 0 |" in text
+
+
+def _failing_after(first: int, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Let the first ``first`` bench runs succeed and fail the rest; returns the persona ids."""
+    started: list[str] = []
+    real = bench.run_one
+
+    def run_one(persona: PersonaSeed, *args: Any, **kwargs: Any) -> bench.BenchRun:
+        started.append(persona.id)
+        if len(started) > first:
+            raise LLMError("quota exceeded")
+        return real(persona, *args, **kwargs)
+
+    monkeypatch.setattr(bench, "run_one", run_one)
+    return started
+
+
+def test_a_failed_run_still_reports_the_finished_ones(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started = _failing_after(1, monkeypatch)
+    args = ["bench", "--persona", "anxious-newcomer", "--persona", "boundary-tester"]
+    args += ["--persona", "grieving-after-loss", "--days", "1", "--turns", "1"]
+    assert main([*args, "--out", str(tmp_path)]) == 1
+    assert started == ["anxious-newcomer", "boundary-tester"]  # stops at the first failure
+    err = capsys.readouterr().err
+    assert "fake / boundary-tester: quota exceeded" in err
+    assert "--skip-existing" in err
+    assert "| fake | anxious-newcomer |" in (tmp_path / "bench.md").read_text(encoding="utf-8")
+
+
+def test_skip_existing_resumes_only_runs_with_the_same_settings(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out = ["--out", str(tmp_path), "--turns", "1"]
+    assert main(["bench", "--persona", "anxious-newcomer", "--days", "1", *out]) == 0
+    started = _failing_after(10, monkeypatch)
+    personas = ["--persona", "anxious-newcomer", "--persona", "boundary-tester"]
+    assert main(["bench", *personas, "--days", "1", "--skip-existing", *out]) == 0
+    assert started == ["boundary-tester"]
+    assert "fake / anxious-newcomer: kept" in capsys.readouterr().out
+    assert main(["bench", *personas, "--days", "2", "--skip-existing", *out]) == 0
+    assert started == ["boundary-tester", "anxious-newcomer", "boundary-tester"]
+
+
+def test_repeated_personas_run_once(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    args = ["bench", "--persona", "anxious-newcomer", "--persona", "anxious-newcomer"]
+    assert main([*args, "--days", "1", "--turns", "1", "--out", str(tmp_path)]) == 0
+    assert capsys.readouterr().out.count("fake / anxious-newcomer:") == 1
 
 
 def test_bench_cli_errors(

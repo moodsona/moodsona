@@ -31,14 +31,9 @@ from moodsona.llm.anthropic import AnthropicProvider
 from moodsona.llm.base import LLMProvider
 from moodsona.llm.fake import FakeProvider
 from moodsona.llm.openai import OpenAIProvider
-from moodsona.metrics import (
-    TranscriptMetrics,
-    compute_metrics,
-    format_number,
-    format_share,
-    metrics_from_jsonl,
-)
-from moodsona.runner import run
+from moodsona.metrics import TranscriptMetrics, compute_metrics, format_number, format_share
+from moodsona.personas import list_bundled_personas, load_bundled_persona
+from moodsona.runner import Transcript, run
 from moodsona.simulator import SimulatorConfig
 from moodsona.state import PersonaSeed
 
@@ -47,10 +42,13 @@ __all__ = [
     "PROVIDERS",
     "BenchRun",
     "bench_companion",
+    "collect_runs",
+    "load_personas",
     "make_provider",
     "max_model_calls",
     "mean_or_none",
     "run_one",
+    "run_path",
     "safe_label",
     "write_report",
 ]
@@ -99,8 +97,26 @@ def make_provider(name: str, model: str | None) -> LLMProvider:
     raise ValueError(f"unknown provider {name!r}; use one of {', '.join(PROVIDERS)}")
 
 
+def load_personas(ids: Sequence[str] | None = None) -> list[PersonaSeed]:
+    """Load bundled personas for a bench, each id once, in the order given.
+
+    Args:
+        ids: Bundled persona ids; None (or empty) means all bundled personas.
+
+    Raises:
+        KeyError: An id is not a bundled persona.
+        PersonaError: A bundled persona file is invalid.
+        FileNotFoundError: The bundled personas are missing (broken install).
+    """
+    return [load_bundled_persona(i) for i in dict.fromkeys(ids or list_bundled_personas())]
+
+
 def safe_label(text: str) -> str:
-    """Turn a model id into a directory name: runs of other characters become ``-``."""
+    """Turn a model id into a directory name: runs of other characters become ``-``.
+
+    Ids that differ only in those characters (``org/model`` and ``org:model``)
+    get the same label, so their runs share a directory.
+    """
     label = re.sub(r"[^A-Za-z0-9._-]+", "-", text).strip("-.")
     return label or "model"
 
@@ -123,12 +139,27 @@ class BenchRun:
     Attributes:
         model: The model label (the directory the transcript is in).
         path: The transcript JSONL.
+        days: Simulated days the run was given (None when the file does not say).
+        turns_per_day: Maximum persona messages per day the run was given
+            (None when the file does not say).
         metrics: Its metrics.
     """
 
     model: str
     path: Path
+    days: int | None
+    turns_per_day: int | None
     metrics: TranscriptMetrics
+
+    @property
+    def setting(self) -> str:
+        """``"<days> x <turns per day>"``, the run length the report groups by."""
+        return " x ".join("?" if n is None else str(n) for n in (self.days, self.turns_per_day))
+
+
+def run_path(out_dir: str | PathLike[str], model: str, persona_id: str, rng_seed: int) -> Path:
+    """The transcript path of a run: ``<out_dir>/<model>/<persona id>-seed<rng_seed>.jsonl``."""
+    return Path(out_dir) / model / f"{persona_id}-seed{rng_seed}.jsonl"
 
 
 def run_one(
@@ -143,8 +174,9 @@ def run_one(
 ) -> BenchRun:
     """Run one persona against the fixed companion and write its transcript.
 
-    The transcript goes to ``<out_dir>/<model>/<persona id>-seed<rng_seed>.jsonl``
-    (an earlier file of the same run is replaced).
+    The transcript goes to :func:`run_path` (an earlier file of the same run is
+    replaced). The folder is created before the first model call, so a run is
+    not paid for and then lost to an unwritable directory.
 
     Args:
         persona: The persona.
@@ -157,13 +189,14 @@ def run_one(
 
     Raises:
         moodsona.llm.LLMError: The provider failed.
+        OSError: The transcript cannot be written.
     """
+    path = run_path(out_dir, model, persona.id, rng_seed)
+    path.parent.mkdir(parents=True, exist_ok=True)
     transcript = run(persona, provider, bench_companion(), days, turns_per_day, rng_seed)
-    folder = Path(out_dir) / model
-    folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"{persona.id}-seed{rng_seed}.jsonl"
     transcript.to_jsonl(path)
-    return BenchRun(model, path, compute_metrics(transcript))
+    metrics = compute_metrics(transcript, language=persona.language)
+    return BenchRun(model, path, days, turns_per_day, metrics)
 
 
 def mean_or_none(values: Sequence[float | None]) -> float | None:
@@ -203,15 +236,37 @@ def _table(first: Sequence[str], rows: Sequence[Sequence[str]]) -> list[str]:
     return [_row(header), _row(["---"] * len(header)), *(_row(r) for r in rows)]
 
 
-def _collect(out_dir: Path) -> list[BenchRun]:
-    return [
-        BenchRun(path.parent.name, path, metrics_from_jsonl(path))
-        for path in sorted(out_dir.glob("*/*.jsonl"))
-    ]
+def collect_runs(out_dir: str | PathLike[str]) -> list[BenchRun]:
+    """Read every bench run in ``<out_dir>/<model>/*.jsonl``, sorted by path.
+
+    A missing directory has no runs. Each transcript is scored in its bundled
+    persona's language (transcripts do not record it), or English for an id
+    that is not bundled.
+
+    Raises:
+        ValueError: A file is not a transcript.
+        OSError: A file cannot be read.
+    """
+    paths = sorted(Path(out_dir).glob("*/*.jsonl"))
+    if not paths:
+        return []
+    languages = {p.id: p.language for p in load_personas()}
+    runs = []
+    for path in paths:
+        transcript = Transcript.from_jsonl(path)
+        language = languages.get(transcript.persona_id, "en")
+        metrics = compute_metrics(transcript, language=language)
+        runs.append(
+            BenchRun(path.parent.name, path, transcript.days, transcript.turns_per_day, metrics)
+        )
+    return runs
 
 
 def write_report(out_dir: str | PathLike[str]) -> Path:
     """Write ``bench.md`` for every transcript in ``<out_dir>/<model>/``.
+
+    Runs are averaged per model and run length (days x turns per day), so runs
+    of different lengths are never mixed in one row.
 
     Args:
         out_dir: The bench directory.
@@ -224,17 +279,18 @@ def write_report(out_dir: str | PathLike[str]) -> Path:
         OSError: A file cannot be read or written.
     """
     folder = Path(out_dir)
-    runs = _collect(folder)
+    runs = collect_runs(folder)
     if not runs:
         raise ValueError(f"{folder}: no bench runs (expected <model>/<persona>-seed<n>.jsonl)")
-    models = sorted({r.model for r in runs})
+    groups: dict[tuple[str, str], list[BenchRun]] = {}
+    for r in runs:
+        groups.setdefault((r.model, r.setting), []).append(r)
     summary = []
-    for model in models:
-        mine = [r.metrics for r in runs if r.model == model]
-        cells = [fmt(mean_or_none([get(m) for m in mine])) for _, get, fmt in _COLUMNS]
-        summary.append([model, str(len(mine)), *cells])
+    for (model, setting), mine in sorted(groups.items()):
+        cells = [fmt(mean_or_none([get(r.metrics) for r in mine])) for _, get, fmt in _COLUMNS]
+        summary.append([model, setting, str(len(mine)), *cells])
     per_run = [
-        [r.model, r.metrics.persona_id, str(r.metrics.rng_seed), str(r.metrics.turns)]
+        [r.model, r.metrics.persona_id, r.setting, str(r.metrics.rng_seed), str(r.metrics.turns)]
         + [fmt(get(r.metrics)) for _, get, fmt in _COLUMNS]
         for r in runs
     ]
@@ -242,17 +298,18 @@ def write_report(out_dir: str | PathLike[str]) -> Path:
         "# moodsona bench",
         "",
         "User models playing moodsona personas against a fixed scripted companion. "
-        "Each model row is the mean over its runs (persona x seed); `n/a` means there "
+        "Each model row is the mean over its runs (persona x seed) of one length "
+        "(days x turns per day); `n/a` means there "
         "was nothing to count. Definitions: `moodsona.metrics`. Lower is better for "
         "polluted, forced, own repeats, agreement, ask-back and wrong language; the "
         "other columns describe behaviour and are read against each persona's design. "
         "There is no single score yet.",
         "",
-        *_table(["model", "runs"], summary),
+        *_table(["model", "days x turns", "runs"], summary),
         "",
         "## Per run",
         "",
-        *_table(["model", "persona", "seed", "turns"], per_run),
+        *_table(["model", "persona", "days x turns", "seed", "turns"], per_run),
         "",
     ]
     path = folder / REPORT_NAME
