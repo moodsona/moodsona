@@ -8,7 +8,7 @@ build-backend = "hatchling.build"
 [project]
 name = "moodsona"
 # Managed by release-please (see release-please-config.json). Do not edit by hand.
-version = "0.0.0"
+version = "0.1.0"
 description = "Emotional user simulator for testing AI companion chatbots."
 readme = "README.md"
 requires-python = ">=3.11"
