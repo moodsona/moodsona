@@ -20,22 +20,25 @@ What is counted over what:
   language profile), never a misleading 0.
 
 The agreement, ask-back and wrong-language checks are the language profile's
-heuristics (:mod:`moodsona.lang`), the same ones the simulator's rails use.
+heuristics (:mod:`moodsona.lang`), and the own-repeat check uses the
+simulator's thresholds, so the metrics count what the rails look for.
 """
 
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import asdict, dataclass, field
-from itertools import pairwise
+from collections.abc import Sequence
+from dataclasses import asdict, dataclass
+from itertools import groupby, pairwise
 from os import PathLike
-from statistics import fmean
+from statistics import fmean, linear_regression
 from typing import Any
 
 from moodsona.checks import repeats_earlier
 from moodsona.lang import get_profile
 from moodsona.lang.base import LanguageProfile
 from moodsona.runner import Transcript, TurnRecord
+from moodsona.simulator import SimulatorConfig
 from moodsona.state import Intent
 
 #: Messages with at most this many words count as short.
@@ -67,6 +70,7 @@ class TranscriptMetrics:
 
     Attributes:
         persona_id: The simulated persona.
+        rng_seed: The run's random seed.
         turns: All turns, polluted ones included.
         messages: Turns that are not polluted (the base of the message rates).
         active_days: Days with at least one turn.
@@ -79,7 +83,7 @@ class TranscriptMetrics:
         rule_trigger_rate: Share of messages whose hidden block reports at
             least one triggered reaction rule.
         rule_counts: How often each rule number was reported, as the model
-            reported them (unchecked).
+            reported them (unchecked), sorted by rule number.
         own_repeat_rate: Share of messages that nearly repeat an earlier
             message of the same day (the simulator's ``own_repeat`` rail).
         agreement_rate: Share of messages that are a bare agreement.
@@ -95,33 +99,34 @@ class TranscriptMetrics:
     """
 
     persona_id: str
+    rng_seed: int
     turns: int
     messages: int
     active_days: int
     days_skipped: int
     emotion: SeriesSummary
     energy: SeriesSummary
-    intent_shares: dict[str, float] = field(default_factory=dict)
-    rule_trigger_rate: float | None = None
-    rule_counts: dict[int, int] = field(default_factory=dict)
-    own_repeat_rate: float | None = None
-    agreement_rate: float | None = None
-    ask_back_rate: float | None = None
-    mean_message_chars: float | None = None
-    short_message_share: float | None = None
-    wrong_language_share: float | None = None
-    stance_changes_per_day: float | None = None
-    polluted_share: float | None = None
-    forced_share: float | None = None
+    intent_shares: dict[str, float]
+    rule_trigger_rate: float | None
+    rule_counts: dict[int, int]
+    own_repeat_rate: float | None
+    agreement_rate: float | None
+    ask_back_rate: float | None
+    mean_message_chars: float | None
+    short_message_share: float | None
+    wrong_language_share: float | None
+    stance_changes_per_day: float | None
+    polluted_share: float | None
+    forced_share: float | None
 
     def to_dict(self) -> dict[str, Any]:
         """JSON-ready form (rule numbers become string keys, as JSON requires)."""
         data = asdict(self)
-        data["rule_counts"] = {str(k): v for k, v in sorted(self.rule_counts.items())}
+        data["rule_counts"] = {str(k): v for k, v in self.rule_counts.items()}
         return data
 
 
-def _mean(values: list[float]) -> float | None:
+def _mean(values: Sequence[float]) -> float | None:
     return fmean(values) if values else None
 
 
@@ -139,27 +144,29 @@ def summarize_series(points: list[tuple[int, int]]) -> SeriesSummary:
         Mean, drift per day (least-squares slope over the turns) and
         volatility (mean absolute change between consecutive turns).
     """
-    values = [float(v) for _, v in points]
-    mean = _mean(values)
+    days = [d for d, _ in points]
+    values = [v for _, v in points]
+    drift = linear_regression(days, values).slope if len(set(days)) >= 2 else None
     volatility = _mean([abs(b - a) for a, b in pairwise(values)])
-    drift: float | None = None
-    days = [float(d) for d, _ in points]
-    if len(set(days)) >= 2 and mean is not None:
-        mean_day = sum(days) / len(days)
-        spread = sum((d - mean_day) ** 2 for d in days)
-        drift = sum((d - mean_day) * (v - mean) for d, v in zip(days, values, strict=True)) / spread
-    return SeriesSummary(mean, drift, volatility)
+    return SeriesSummary(_mean(values), drift, volatility)
 
 
 def _own_repeats(messages: list[TurnRecord]) -> list[bool]:
     """For each message, whether it nearly repeats an earlier message of the same day."""
+    config = SimulatorConfig()
     flags: list[bool] = []
-    today: list[str] = []
-    for i, record in enumerate(messages):
-        if i and record.day != messages[i - 1].day:
-            today = []
-        flags.append(repeats_earlier(record.visible, today))
-        today.append(record.visible)
+    for _, day in groupby(messages, key=lambda t: t.day):
+        today: list[str] = []
+        for record in day:
+            flags.append(
+                repeats_earlier(
+                    record.visible,
+                    today,
+                    threshold=config.own_repeat_jaccard,
+                    min_words=config.own_repeat_min_words,
+                )
+            )
+            today.append(record.visible)
     return flags
 
 
@@ -189,17 +196,26 @@ def compute_metrics(
     hidden = [t.hidden for t in messages if t.hidden is not None]  # the same, typed for mypy
     active_days = len({t.day for t in turns})
 
-    intents = Counter(str(h.get("intent")) for h in hidden)
-    intent_shares = {i.value: intents.pop(i.value, 0) / len(hidden) for i in Intent if hidden}
-    if intents:  # missing or unknown intents (e.g. from a newer version's file)
-        intent_shares[OTHER_INTENT] = intents.total() / len(hidden)
+    intent_shares: dict[str, float] = {}
+    if hidden:
+        intents = Counter(str(h.get("intent")) for h in hidden)
+        known = {i.value: intents.pop(i.value, 0) for i in Intent}
+        if intents:  # missing or unknown intents (e.g. from a newer version's file)
+            known[OTHER_INTENT] = intents.total()
+        intent_shares = {name: count / len(hidden) for name, count in known.items()}
     reported = [list(h.get("rules_triggered") or []) for h in hidden]
     rule_counts = Counter(n for numbers in reported for n in numbers)
 
     texts = [t.visible for t in messages]
+    agreement = ask_back = wrong_language = None
+    if profile is not None:
+        agreement = _share([profile.is_agreement(x) for x in texts])
+        ask_back = _share([profile.is_ask_back(x) for x in texts])
+        wrong_language = _share([profile.is_wrong_language(x) for x in texts])
     stance_changes = sum(a.mood.stance != b.mood.stance for a, b in pairwise(messages))
     return TranscriptMetrics(
         persona_id=transcript.persona_id,
+        rng_seed=transcript.rng_seed,
         turns=len(turns),
         messages=len(messages),
         active_days=active_days,
@@ -210,28 +226,33 @@ def compute_metrics(
         rule_trigger_rate=_share([bool(numbers) for numbers in reported]),
         rule_counts=dict(sorted(rule_counts.items())),
         own_repeat_rate=_share(_own_repeats(messages)),
-        agreement_rate=_share([profile.is_agreement(x) for x in texts]) if profile else None,
-        ask_back_rate=_share([profile.is_ask_back(x) for x in texts]) if profile else None,
-        mean_message_chars=_mean([float(len(x)) for x in texts]),
+        agreement_rate=agreement,
+        ask_back_rate=ask_back,
+        mean_message_chars=_mean([len(x) for x in texts]),
         short_message_share=_share([len(x.split()) <= short_max_words for x in texts]),
-        wrong_language_share=(
-            _share([profile.is_wrong_language(x) for x in texts]) if profile else None
-        ),
+        wrong_language_share=wrong_language,
         stance_changes_per_day=stance_changes / active_days if active_days else None,
         polluted_share=_share([t.polluted for t in turns]),
         forced_share=_share([t.forced is not None for t in turns]),
     )
 
 
-def metrics_from_jsonl(path: str | PathLike[str], **options: Any) -> TranscriptMetrics:
+def metrics_from_jsonl(
+    path: str | PathLike[str],
+    *,
+    language: LanguageProfile | str | None = "en",
+    short_max_words: int = SHORT_MAX_WORDS,
+) -> TranscriptMetrics:
     """Read a transcript JSONL file and compute its metrics.
 
     Args:
         path: A file written by :meth:`Transcript.to_jsonl`.
-        **options: Passed to :func:`compute_metrics`.
+        language: See :func:`compute_metrics`.
+        short_max_words: See :func:`compute_metrics`.
 
     Raises:
         OSError: The file cannot be read.
         ValueError: The file is not a transcript.
     """
-    return compute_metrics(Transcript.from_jsonl(path), **options)
+    transcript = Transcript.from_jsonl(path)
+    return compute_metrics(transcript, language=language, short_max_words=short_max_words)

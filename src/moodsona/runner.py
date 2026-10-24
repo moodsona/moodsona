@@ -70,6 +70,39 @@ class TurnRecord:
             "forced": self.forced,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TurnRecord:
+        """Rebuild a record from :meth:`as_dict` output.
+
+        Raises:
+            KeyError: A field is missing.
+            ValueError: A field has the wrong type or an out-of-range value.
+        """
+        hidden = data["hidden"]
+        _require(hidden is None or isinstance(hidden, dict), "hidden must be an object or null")
+        if hidden is not None:
+            rules = hidden.get("rules_triggered", [])
+            _require(
+                isinstance(rules, list) and all(map(_is_int, rules)),
+                "hidden.rules_triggered must be a list of integers",
+            )
+        problems, forced = data["problems"], data["forced"]
+        _require(isinstance(data["polluted"], bool), "polluted must be true or false")
+        _require(isinstance(problems, list), "problems must be a list")
+        _require(forced is None or isinstance(forced, str), "forced must be a string or null")
+        state = data["state_after"]
+        return cls(
+            day=int(data["day"]),
+            turn=int(data["turn"]),
+            hidden=hidden,
+            visible=str(data["visible"]),
+            companion_reply=str(data["companion_reply"]),
+            mood=Mood(state["emotion"], state["energy"], Stance(state["stance"])),
+            polluted=data["polluted"],
+            problems=tuple(problems),
+            forced=forced,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class TrajectoryPoint:
@@ -185,12 +218,12 @@ class Transcript:
                 elif kind == "run":
                     raise ValueError("a second 'run' line; one file holds one run")
                 elif kind == "turn":
-                    transcript.turns.append(_turn_from_dict(data))
+                    transcript.turns.append(TurnRecord.from_dict(data))
                 elif kind == "day_notes":
                     transcript.notes.append(_note_from_dict(data))
                 elif kind == "skipped_day":
                     transcript.skipped_days.append(int(data["day"]))
-            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            except (KeyError, TypeError, ValueError) as exc:  # JSONDecodeError is a ValueError
                 raise ValueError(f"{path}:{number}: {exc}") from exc
         if transcript is None:
             raise ValueError(f"{path}: no 'run' line")
@@ -204,33 +237,6 @@ def _require(condition: bool, problem: str) -> None:
 
 def _is_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
-
-
-def _turn_from_dict(data: dict[str, Any]) -> TurnRecord:
-    hidden = data["hidden"]
-    _require(hidden is None or isinstance(hidden, dict), "hidden must be an object or null")
-    if hidden is not None:
-        rules = hidden.get("rules_triggered", [])
-        _require(
-            isinstance(rules, list) and all(map(_is_int, rules)),
-            "hidden.rules_triggered must be a list of integers",
-        )
-    problems, forced = data["problems"], data["forced"]
-    _require(isinstance(data["polluted"], bool), "polluted must be true or false")
-    _require(isinstance(problems, list), "problems must be a list")
-    _require(forced is None or isinstance(forced, str), "forced must be a string or null")
-    state = data["state_after"]
-    return TurnRecord(
-        day=int(data["day"]),
-        turn=int(data["turn"]),
-        hidden=hidden,
-        visible=str(data["visible"]),
-        companion_reply=str(data["companion_reply"]),
-        mood=Mood(state["emotion"], state["energy"], Stance(state["stance"])),
-        polluted=data["polluted"],
-        problems=tuple(problems),
-        forced=forced,
-    )
 
 
 def _note_from_dict(data: dict[str, Any]) -> DayNote:

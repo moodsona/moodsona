@@ -100,8 +100,8 @@ def test_jsonl_round_trip(tmp_path: Path) -> None:
     [
         ("", "no 'run' line"),
         ('{"kind": "turn"}\n', "first line must be"),
-        ('{"kind": "run", "persona_id": "x", "rng_seed": 0}\nnot json\n', ":2:"),
-        ('{"kind": "run", "persona_id": "x", "rng_seed": 0}\n{"kind": "turn", "day": 1}\n', ":2:"),
+        (RUN + "not json\n", ":2:"),
+        (RUN + '{"kind": "turn", "day": 1}\n', ":2:"),
         (RUN + "[1]\n", "not a JSON object"),
         (RUN + RUN, "second 'run' line"),
     ],

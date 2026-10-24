@@ -18,9 +18,9 @@ from collections.abc import Sequence
 from moodsona.companion import EchoCompanion
 from moodsona.llm.base import LLMError
 from moodsona.llm.fake import FakeProvider
-from moodsona.metrics import compute_metrics
+from moodsona.metrics import metrics_from_jsonl
 from moodsona.personas import PersonaError, load_persona
-from moodsona.runner import Transcript, run
+from moodsona.runner import run
 from moodsona.validation import main as validate_main
 
 
@@ -52,26 +52,25 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _pct(value: float | None) -> str:
-    return "n/a" if value is None else f"{value:.0%}"
-
-
 def _num(value: float | None, spec: str = ".1f") -> str:
     return "n/a" if value is None else format(value, spec)
 
 
+def _pct(value: float | None) -> str:
+    return _num(value, ".0%")
+
+
 def _report(args: argparse.Namespace) -> int:
     try:
-        transcript = Transcript.from_jsonl(args.transcript)
+        m = metrics_from_jsonl(args.transcript)
     except (OSError, ValueError) as exc:
         sys.stderr.write(f"{exc}\n")
         return 1
-    m = compute_metrics(transcript)
     if args.json:
         sys.stdout.write(json.dumps(m.to_dict(), indent=2) + "\n")
         return 0
     lines = [
-        f"persona {m.persona_id} (seed {transcript.rng_seed}): {m.turns} turn(s) on "
+        f"persona {m.persona_id} (seed {m.rng_seed}): {m.turns} turn(s) on "
         f"{m.active_days} active day(s), {m.days_skipped} day(s) skipped",
         f"{'':<15}{'mean':>6}{'drift/day':>11}{'volatility':>12}",
     ]
@@ -80,7 +79,7 @@ def _report(args: argparse.Namespace) -> int:
             f"{name:<15}{_num(s.mean):>6}{_num(s.drift_per_day, '+.2f'):>11}"
             f"{_num(s.volatility):>12}"
         )
-    intents = ", ".join(f"{k} {v:.0%}" for k, v in m.intent_shares.items() if v)
+    intents = ", ".join(f"{k} {_pct(v)}" for k, v in m.intent_shares.items() if v)
     rules = ", ".join(f"rule {n} x{count}" for n, count in m.rule_counts.items())
     rows = [
         ("intents", intents or "n/a"),
