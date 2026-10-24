@@ -18,7 +18,6 @@ from collections.abc import Sequence
 from moodsona.companion import EchoCompanion
 from moodsona.llm.base import LLMError
 from moodsona.llm.fake import FakeProvider
-from moodsona.metrics import metrics_from_jsonl
 from moodsona.personas import PersonaError, load_persona
 from moodsona.runner import run
 from moodsona.validation import main as validate_main
@@ -52,6 +51,30 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _smoke(args: argparse.Namespace) -> int:
+    try:
+        seed = load_persona(args.persona)
+    except (PersonaError, FileNotFoundError) as exc:  # FileNotFoundError: broken install
+        sys.stderr.write(f"{exc}\n")
+        return 1
+    if args.days < 1 or args.turns < 1:
+        sys.stderr.write("--days and --turns must be at least 1\n")
+        return 1
+    try:
+        transcript = run(seed, FakeProvider(), EchoCompanion(), args.days, args.turns, args.seed)
+    except (LookupError, LLMError) as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 1
+    out = sys.stdout
+    out.write(f"persona {seed.id}: {len(transcript.turns)} turn(s), offline fake model\n")
+    out.write(f"{'day':>3} {'turn':>4} {'emotion':>7} {'energy':>6}  stance\n")
+    for point in transcript.trajectory():
+        out.write(
+            f"{point.day:>3} {point.turn:>4} {point.emotion:>7} {point.energy:>6}  {point.stance}\n"
+        )
+    return 0
+
+
 def _num(value: float | None, spec: str = ".1f") -> str:
     return "n/a" if value is None else format(value, spec)
 
@@ -61,6 +84,8 @@ def _pct(value: float | None) -> str:
 
 
 def _report(args: argparse.Namespace) -> int:
+    from moodsona.metrics import metrics_from_jsonl  # only `report` needs it
+
     try:
         m = metrics_from_jsonl(args.transcript)
     except (OSError, ValueError) as exc:
@@ -95,30 +120,6 @@ def _report(args: argparse.Namespace) -> int:
     ]
     lines += [f"{label:<15}{value}" for label, value in rows]
     sys.stdout.write("\n".join(lines) + "\n")
-    return 0
-
-
-def _smoke(args: argparse.Namespace) -> int:
-    try:
-        seed = load_persona(args.persona)
-    except (PersonaError, FileNotFoundError) as exc:  # FileNotFoundError: broken install
-        sys.stderr.write(f"{exc}\n")
-        return 1
-    if args.days < 1 or args.turns < 1:
-        sys.stderr.write("--days and --turns must be at least 1\n")
-        return 1
-    try:
-        transcript = run(seed, FakeProvider(), EchoCompanion(), args.days, args.turns, args.seed)
-    except (LookupError, LLMError) as exc:
-        sys.stderr.write(f"{exc}\n")
-        return 1
-    out = sys.stdout
-    out.write(f"persona {seed.id}: {len(transcript.turns)} turn(s), offline fake model\n")
-    out.write(f"{'day':>3} {'turn':>4} {'emotion':>7} {'energy':>6}  stance\n")
-    for point in transcript.trajectory():
-        out.write(
-            f"{point.day:>3} {point.turn:>4} {point.emotion:>7} {point.energy:>6}  {point.stance}\n"
-        )
     return 0
 
 
