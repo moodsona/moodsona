@@ -32,6 +32,13 @@ from moodsona.validation import YAML_SUFFIXES
 from moodsona.validation import main as validate_main
 
 
+def _positive(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
+    return value
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="moodsona",
@@ -121,13 +128,6 @@ def _validate(args: argparse.Namespace) -> int:
             sys.stderr.write(f"{arg}: {exc}\n")
             return 2
     return validate_main(paths)
-
-
-def _positive(text: str) -> int:
-    value = int(text)
-    if value < 1:
-        raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
-    return value
 
 
 def _smoke(args: argparse.Namespace) -> int:
