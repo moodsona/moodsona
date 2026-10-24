@@ -129,6 +129,32 @@ days skipped. The numbers describe the simulated user, not your bot; compare
 them across user models, personas or seeds. Exact definitions are in the
 module docstring. New in v0.2; names may still change before 1.0.
 
+## Benchmark (scaffold)
+
+`moodsona bench` runs bundled personas with one user model (the model that
+plays the persona) against a fixed scripted companion, writes one JSONL per
+run to `<out>/<model>/`, and writes `<out>/bench.md`: the metrics above per
+model and per run. Run it once per model into the same directory to compare
+models. Offline check, free:
+
+```bash
+moodsona bench --days 2 --turns 3          # fake provider, all bundled personas
+```
+
+With a real provider **every run costs money**: by default 7 personas x 3
+days x 6 turns, up to 420 model calls per model. The command refuses to start
+without `--yes` and tells you the worst-case number of calls first.
+
+```bash
+pip install "moodsona[anthropic]"          # or moodsona[openai]
+moodsona bench --provider anthropic --model claude-sonnet-5-5 --yes --out bench-results
+moodsona bench --provider openai --model gpt-5-mini --yes --out bench-results
+```
+
+This is the scaffold for the user-model leaderboard on the roadmap: there is
+no single score yet, and the companion is a fixed script, so the numbers say
+how well a user model holds the personas, not how good a companion is.
+
 ## CLI
 
 ```bash
