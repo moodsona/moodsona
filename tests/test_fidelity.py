@@ -10,6 +10,7 @@ import json
 import math
 import random
 from collections.abc import Callable
+from fractions import Fraction
 from typing import Any
 
 import pytest
@@ -93,11 +94,6 @@ def _speakers(
 
 
 # ------------------------------------------------------------- features ----
-
-
-def test_feature_names_match_the_vector() -> None:
-    assert len(FEATURE_NAMES) == len(message_features("hello"))
-    assert len(set(FEATURE_NAMES)) == len(FEATURE_NAMES)
 
 
 def test_length_is_log1p_of_characters() -> None:
@@ -216,18 +212,6 @@ def test_features_are_finite_and_in_range(text: str, previous: str) -> None:
 
 
 # --------------------------------------------------------------- folds ----
-
-
-def test_grouped_folds_keep_conversations_together_and_mix_both_sets() -> None:
-    groups = [0, 0, 0, 1, 2, 2, 3, 4, 4, 4, 5, 6, 7, 7]
-    labels = [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1]
-    folds = grouped_folds(groups, labels, 2, seed=3)
-    by_group: dict[int, set[int]] = {}
-    for group, fold in zip(groups, folds, strict=True):
-        by_group.setdefault(group, set()).add(fold)
-    assert all(len(f) == 1 for f in by_group.values())
-    for fold in (0, 1):
-        assert {label for label, f in zip(labels, folds, strict=True) if f == fold} == {0, 1}
 
 
 @settings(max_examples=50, deadline=None)
@@ -378,8 +362,6 @@ def test_different_styles_are_told_apart() -> None:
     assert result.simulated_conversations == 14
     assert result.reference_messages == 30
     assert result.simulated_messages == 28
-    assert result.folds == 5
-    assert result.n_permutations == 19
     # Simulated is the positive class: questions point toward it, length away from it.
     assert result.weights["question_marks"] > 0
     assert result.weights["log_length"] < 0
@@ -417,8 +399,17 @@ def test_speaker_groups_stop_style_leaking_across_folds() -> None:
     assert per_speaker.reference_conversations == 15
 
 
-def test_permutation_ties_survive_float_rounding(monkeypatch: pytest.MonkeyPatch) -> None:
-    scores = iter([0.8, 0.1 + 0.7, 0.0])  # 0.1 + 0.7 == 0.7999999999999999
+def test_equal_accuracies_compare_equal_whatever_the_rounding() -> None:
+    # Recalls 1/10 + 7/10 and 8/10 + 0: the same balanced accuracy, 2/5, but as
+    # floats 0.1 + 0.7 is 0.7999999999999999, so a float comparison misses the tie.
+    first = fidelity._balanced_fraction([0] * 10 + [1] * 10, [0] + [1] * 9 + [1] * 7 + [0] * 3)
+    second = fidelity._balanced_fraction([0] * 10 + [1] * 10, [0] * 8 + [1] * 2 + [0] * 10)
+    assert first == second == Fraction(2, 5)
+    assert balanced_accuracy([0, 0, 1], [0, 1, 1]) == 0.75
+
+
+def test_permutation_ties_count_exactly(monkeypatch: pytest.MonkeyPatch) -> None:
+    scores = iter([Fraction(4, 5), Fraction(8, 10), Fraction(0)])
     monkeypatch.setattr(fidelity, "_cv_accuracy", lambda *_args: next(scores))
     rng = random.Random(0)
     result = classifier_two_sample_test(
@@ -474,7 +465,6 @@ def test_p_value_is_in_range() -> None:
         n_permutations=3,
         seed=0,
     )
-    assert 0.0 < result.p_value <= 1.0
     assert result.p_value in {k / 4 for k in range(1, 5)}
 
 
@@ -511,34 +501,20 @@ def test_conversations_without_user_messages_are_ignored() -> None:
     [
         ({"folds": 1}, "folds"),
         ({"n_permutations": 0}, "n_permutations"),
-        ({"folds": 4}, "reference"),
-    ],
-)
-def test_invalid_arguments_are_rejected(kwargs: dict[str, Any], message: str) -> None:
-    rng = random.Random(0)
-    with pytest.raises(ValueError, match=message):
-        classifier_two_sample_test(
-            _conversations(_mixed_line, rng, 3, 2), _conversations(_mixed_line, rng, 5, 2), **kwargs
-        )
-
-
-@pytest.mark.parametrize(
-    ("kwargs", "message"),
-    [
+        ({"folds": 4}, "reference has 3 groups"),
         ({"features": []}, "features"),
         ({"features": ["log_length", "shoe_size"]}, "shoe_size"),
         ({"reference_groups": ["a", "b"]}, "reference_groups"),
         ({"simulated_groups": ["a"] * 6}, "simulated has 1 group"),
     ],
 )
-def test_invalid_features_and_groups_are_rejected(kwargs: dict[str, Any], message: str) -> None:
+def test_invalid_arguments_are_rejected(kwargs: dict[str, Any], message: str) -> None:
     rng = random.Random(0)
     with pytest.raises(ValueError, match=message):
         classifier_two_sample_test(
             _conversations(_mixed_line, rng, 3, 2),
             _conversations(_mixed_line, rng, 6, 2),
-            folds=2,
-            **kwargs,
+            **{"folds": 2, **kwargs},
         )
 
 

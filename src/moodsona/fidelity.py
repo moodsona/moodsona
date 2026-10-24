@@ -40,7 +40,10 @@ data:
 should come from the same or a comparable companion; otherwise leave it out
 with ``features=``.
 
-Everything is seeded: the same inputs and seed give the same result. The cost
+Everything is seeded: the same inputs and seed give the same result on the
+same Python version (float sums changed in 3.12, so the last digits of the
+weights can differ between versions). Accuracies are compared as exact
+fractions, so ties in the permutation test are exact. The cost
 grows with permutations x folds x messages: about 1,600 messages take about
 two minutes with the default 100 permutations, in pure Python.
 
@@ -62,6 +65,7 @@ import re
 import unicodedata
 from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass, field, fields
+from fractions import Fraction
 from operator import mul
 from types import MappingProxyType
 from typing import Any
@@ -100,8 +104,6 @@ _EMOJI_RANGES = ((0x2600, 0x27BF), (0x2B00, 0x2BFF), (0x1F000, 0x1FAFF))
 _ITERATIONS = 200
 _LEARNING_RATE = 0.5
 _L2 = 0.01
-# Permuted accuracies this close to the observed one count as ties.
-_TIE = 1e-12
 
 
 def _tokens(text: str) -> list[str]:
@@ -236,6 +238,11 @@ def balanced_accuracy(truth: Sequence[int], predicted: Sequence[int]) -> float:
     Raises:
         ValueError: The inputs are empty or of different lengths.
     """
+    return float(_balanced_fraction(truth, predicted))
+
+
+def _balanced_fraction(truth: Sequence[int], predicted: Sequence[int]) -> Fraction:
+    """:func:`balanced_accuracy` as an exact fraction, so equal scores compare equal."""
     if len(truth) != len(predicted):
         raise ValueError("truth and predicted must have the same length")
     if not truth:
@@ -243,8 +250,8 @@ def balanced_accuracy(truth: Sequence[int], predicted: Sequence[int]) -> float:
     recalls = []
     for label in set(truth):
         hits = [p == label for t, p in zip(truth, predicted, strict=True) if t == label]
-        recalls.append(sum(hits) / len(hits))
-    return sum(recalls) / len(recalls)
+        recalls.append(Fraction(sum(hits), len(hits)))
+    return sum(recalls, Fraction(0)) / len(recalls)
 
 
 def _standardiser(rows: Sequence[Sequence[float]]) -> tuple[list[float], list[float]]:
@@ -305,13 +312,26 @@ def _scaled(
     return [[(v - m) / s for v, m, s in zip(row, means, scales, strict=True)] for row in rows]
 
 
+def _fit_standardised(
+    rows: Sequence[Sequence[float]], labels: Sequence[int]
+) -> tuple[list[float], list[float], float, list[float]]:
+    """Standardise the rows with their own mean and scale, then fit.
+
+    Returns:
+        The means and scales (to apply to other rows), the bias and the weights.
+    """
+    means, scales = _standardiser(rows)
+    bias, weights = _fit_logistic(_scaled(rows, means, scales), labels)
+    return means, scales, bias, weights
+
+
 def _cv_accuracy(
     rows: Sequence[tuple[float, ...]],
     groups: Sequence[int],
     group_labels: Sequence[int],
     folds: int,
     seed: int,
-) -> float:
+) -> Fraction:
     """Balanced accuracy of held-out predictions under grouped, stratified k-fold."""
     labels = [group_labels[g] for g in groups]
     fold_of = grouped_folds(groups, labels, folds, seed=seed)
@@ -319,14 +339,12 @@ def _cv_accuracy(
     for fold in range(folds):
         train = [i for i, f in enumerate(fold_of) if f != fold]
         test = [i for i, f in enumerate(fold_of) if f == fold]
-        train_rows = [rows[i] for i in train]
-        means, scales = _standardiser(train_rows)
-        bias, weights = _fit_logistic(
-            _scaled(train_rows, means, scales), [labels[i] for i in train]
+        means, scales, bias, weights = _fit_standardised(
+            [rows[i] for i in train], [labels[i] for i in train]
         )
         for i, row in zip(test, _scaled([rows[i] for i in test], means, scales), strict=True):
             predicted[i] = int(_predict(bias, weights, row) >= 0.5)
-    return balanced_accuracy(labels, predicted)
+    return _balanced_fraction(labels, predicted)
 
 
 @dataclass(frozen=True, slots=True)
@@ -429,7 +447,6 @@ def classifier_two_sample_test(
     rows: list[tuple[float, ...]] = []
     groups: list[int] = []  # group index of each message
     group_labels: list[int] = []  # set label of each group
-    group_index: dict[tuple[int, Hashable], int] = {}
     conversations_used = [0, 0]
     sets = (("reference", reference, reference_groups), ("simulated", simulated, simulated_groups))
     for label, (name, conversations, ids) in enumerate(sets):
@@ -439,20 +456,21 @@ def classifier_two_sample_test(
                 f"got {len(ids)} for {len(conversations)}"
             )
         keys: Sequence[Hashable] = range(len(conversations)) if ids is None else ids
+        index: dict[Hashable, int] = {}  # this set's group ids -> group number
         for conversation, key in zip(conversations, keys, strict=True):
             messages = conversation_features(conversation)
             if not messages:
                 continue
-            group = group_index.setdefault((label, key), len(group_index))
-            if group == len(group_labels):
+            if key not in index:
+                index[key] = len(group_labels)
                 group_labels.append(label)
             rows += [tuple(row[i] for i in keep) for row in messages]
-            groups += [group] * len(messages)
+            groups += [index[key]] * len(messages)
             conversations_used[label] += 1
-        used = group_labels.count(label)
-        if used < folds:
+        if len(index) < folds:
             raise ValueError(
-                f"{name} has {used} groups with user messages; folds={folds} needs at least {folds}"
+                f"{name} has {len(index)} groups with user messages; "
+                f"folds={folds} needs at least {folds}"
             )
 
     observed = _cv_accuracy(rows, groups, group_labels, folds, seed)
@@ -461,14 +479,13 @@ def classifier_two_sample_test(
     at_least_as_good = 0
     for _ in range(n_permutations):
         rng.shuffle(shuffled)
-        if _cv_accuracy(rows, groups, shuffled, folds, seed) >= observed - _TIE:
+        if _cv_accuracy(rows, groups, shuffled, folds, seed) >= observed:
             at_least_as_good += 1
 
     message_labels = [group_labels[g] for g in groups]
-    means, scales = _standardiser(rows)
-    _, weights = _fit_logistic(_scaled(rows, means, scales), message_labels)
+    *_, weights = _fit_standardised(rows, message_labels)
     return FidelityResult(
-        accuracy=observed,
+        accuracy=float(observed),
         p_value=(1 + at_least_as_good) / (1 + n_permutations),
         n_permutations=n_permutations,
         folds=folds,

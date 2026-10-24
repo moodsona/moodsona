@@ -258,7 +258,9 @@ What it does:
    real labels as one, that score at least as high as the real labels. It
    cannot go below `1 / (1 + n_permutations)`, about 0.01 by default.
 
-Everything is seeded, so the same inputs and `seed` give the same result.
+Everything is seeded, so the same inputs and `seed` give the same result on
+the same Python version (float sums changed in Python 3.12, so the last
+digits can differ between versions).
 The folds depend on the seed and on which set is passed first, so swapping
 the sets acts like changing the seed. A borderline result can move with
 either; rerun it with a few seeds before reading much into it. About 1,600
