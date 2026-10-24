@@ -7,8 +7,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "moodsona"
-# Managed by release-please (see release-please-config.json). Do not edit by hand.
-version = "0.0.0"
+# The version lives in src/moodsona/version.py, managed by release-please
+# (see release-please-config.json). Keeping it out of pyproject.toml keeps the
+# project version out of uv.lock, so release PRs do not invalidate the lockfile.
+dynamic = ["version"]
 description = "Emotional user simulator for testing AI companion chatbots."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -71,6 +73,9 @@ Issues = "https://github.com/moodsona/moodsona/issues"
 Changelog = "https://github.com/moodsona/moodsona/blob/main/CHANGELOG.md"
 
 # ---------------------------------------------------------------- build ----
+
+[tool.hatch.version]
+path = "src/moodsona/version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/moodsona"]
