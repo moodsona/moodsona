@@ -74,11 +74,11 @@ jobs:
         with:
           python-version: "3.13"
           enable-cache: false # no cache in release builds (cache-poisoning hardening)
-      - name: Tag matches the version in pyproject.toml
+      - name: Tag matches the version in src/moodsona/version.py
         run: |
-          version=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
-          if [ "v$version" != "$TAG" ]; then
-            echo "::error::tag $TAG does not match pyproject version $version"
+          version=$(sed -nE 's/^__version__ = "([^"]+)"$/\1/p' src/moodsona/version.py)
+          if [ -z "$version" ] || [ "v$version" != "$TAG" ]; then
+            echo "::error::tag $TAG does not match version.py version '$version'"
             exit 1
           fi
       - run: uv build
