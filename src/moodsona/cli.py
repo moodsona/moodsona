@@ -24,6 +24,7 @@ from moodsona.llm.base import LLMError
 from moodsona.llm.fake import FakeProvider
 from moodsona.personas import PersonaError, bundled_persona_path, load_persona
 from moodsona.runner import run
+from moodsona.validation import YAML_SUFFIXES
 from moodsona.validation import main as validate_main
 
 
@@ -54,41 +55,48 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _is_persona_id(arg: str) -> bool:
-    """True for a bare name such as ``anxious-newcomer``: no directory part, no YAML suffix."""
+def _persona_path(arg: str, *, dirs: bool) -> str:
+    """``arg``, or the bundled persona file when ``arg`` is a bare id and no such path exists.
+
+    Only a bare name (no directory part, no YAML suffix) is looked up as an id.
+
+    Args:
+        arg: A command line argument.
+        dirs: Whether an existing directory counts as a path (``validate``) or
+            not (``smoke``, which needs a file).
+
+    Raises:
+        KeyError: ``arg`` is a bare name, but no bundled persona has that id
+            (the message lists the bundled ids).
+        FileNotFoundError: The bundled personas are missing (a broken install).
+    """
     path = Path(arg)
-    return path.name == arg and path.suffix not in {".yaml", ".yml"}
+    exists = path.exists() if dirs else path.is_file()
+    if exists or path.name != arg or path.suffix in YAML_SUFFIXES:
+        return arg
+    return str(bundled_persona_path(arg))
 
 
 def _validate(args: argparse.Namespace) -> int:
     paths: list[str] = []
     for arg in args.paths:
-        if Path(arg).exists() or not _is_persona_id(arg):
-            paths.append(arg)
-            continue
         try:
-            paths.append(str(bundled_persona_path(arg)))
+            paths.append(_persona_path(arg, dirs=True))
         except KeyError as exc:
             sys.stderr.write(f"{arg}: no such file or directory, and {exc.args[0]}\n")
             return 2
-        except FileNotFoundError:  # broken install: the validator reports the missing path
-            paths.append(arg)
+        except FileNotFoundError as exc:  # broken install
+            sys.stderr.write(f"{arg}: {exc}\n")
+            return 2
     return validate_main(paths)
 
 
 def _smoke(args: argparse.Namespace) -> int:
-    path = args.persona
     try:
-        if not Path(path).is_file() and _is_persona_id(path):
-            path = str(bundled_persona_path(path))
-    except KeyError as exc:
+        seed = load_persona(_persona_path(args.persona, dirs=False))
+    except KeyError as exc:  # only the id lookup raises it; load_persona checks the schema first
         sys.stderr.write(f"{args.persona}: no such file, and {exc.args[0]}\n")
         return 1
-    except FileNotFoundError as exc:  # broken install
-        sys.stderr.write(f"{exc}\n")
-        return 1
-    try:
-        seed = load_persona(path)
     except (PersonaError, FileNotFoundError) as exc:  # FileNotFoundError: broken install
         sys.stderr.write(f"{exc}\n")
         return 1

@@ -170,7 +170,7 @@ def test_bundled_names_fail_cleanly_on_a_broken_install(
     assert main(["smoke", "anxious-newcomer"]) == 1
     assert "bundled personas directory not found" in capsys.readouterr().err
     assert main(["validate", "anxious-newcomer"]) == 2
-    assert "anxious-newcomer: no such file or directory" in capsys.readouterr().err
+    assert "bundled personas directory not found" in capsys.readouterr().err
 
 
 def test_smoke_exit_codes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

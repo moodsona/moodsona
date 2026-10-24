@@ -89,12 +89,16 @@ _UniqueKeyLoader.add_constructor(
 )
 
 
+#: File suffixes of persona files.
+YAML_SUFFIXES = frozenset({".yaml", ".yml"})
+
+
 def iter_files(args: Sequence[str | Path]) -> Iterator[Path]:
     """Yield persona YAML files from the given files/directories."""
     for target in map(Path, args):
         if target.is_dir():
-            yield from sorted(p for p in target.rglob("*.y*ml") if p.suffix in {".yaml", ".yml"})
-        elif target.suffix in {".yaml", ".yml"}:
+            yield from sorted(p for p in target.rglob("*.y*ml") if p.suffix in YAML_SUFFIXES)
+        elif target.suffix in YAML_SUFFIXES:
             yield target
 
 
