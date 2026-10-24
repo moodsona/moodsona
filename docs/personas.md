@@ -276,6 +276,7 @@ one that does not?
 Looking for an idea? Issues labelled
 [`good first persona`](https://github.com/moodsona/moodsona/labels/good%20first%20persona)
 are persona ideas a maintainer already liked; comment on the issue to claim it.
+[Persona ideas](persona-ideas.md) lists 20 more briefs to start from.
 You can also suggest an idea without writing the file, using the "Persona idea"
 issue form.
 
