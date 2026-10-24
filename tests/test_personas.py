@@ -11,6 +11,7 @@ import yaml
 from moodsona import personas
 from moodsona.personas import (
     PersonaError,
+    bundled_persona_path,
     bundled_personas_dir,
     list_bundled_personas,
     load_bundled_persona,
@@ -72,6 +73,9 @@ def test_mapping_fields_reach_the_seed() -> None:
 def test_bundled_personas() -> None:
     assert (bundled_personas_dir() / "schema.json").is_file()
     ids = list_bundled_personas()
+    assert bundled_persona_path("anxious-newcomer").name == "anxious-newcomer.yaml"
+    with pytest.raises(KeyError, match="no bundled persona"):
+        bundled_persona_path("does-not-exist")
     assert "anxious-newcomer" in ids
     assert ids == sorted(ids)
     for persona_id in ids:

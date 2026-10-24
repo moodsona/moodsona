@@ -68,6 +68,19 @@ def list_bundled_personas() -> list[str]:
     return sorted(_persona_files())
 
 
+def bundled_persona_path(persona_id: str) -> Path:
+    """The file of a bundled persona.
+
+    Raises:
+        KeyError: No bundled persona has that id.
+        FileNotFoundError: The bundled personas directory is missing (a broken install).
+    """
+    files = _persona_files()
+    if persona_id not in files:
+        raise KeyError(f"no bundled persona {persona_id!r}; known: {sorted(files)}")
+    return files[persona_id]
+
+
 def load_bundled_persona(persona_id: str) -> PersonaSeed:
     """Load a bundled persona by id.
 
@@ -75,10 +88,7 @@ def load_bundled_persona(persona_id: str) -> PersonaSeed:
         KeyError: No bundled persona has that id.
         PersonaError: The file is invalid.
     """
-    files = _persona_files()
-    if persona_id not in files:
-        raise KeyError(f"no bundled persona {persona_id!r}; known: {sorted(files)}")
-    return load_persona(files[persona_id])
+    return load_persona(bundled_persona_path(persona_id))
 
 
 def load_persona(path: str | PathLike[str]) -> PersonaSeed:

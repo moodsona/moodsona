@@ -94,6 +94,58 @@ def test_smoke_prints_the_trajectory(capsys: pytest.CaptureFixture[str]) -> None
     assert len(out) == 6
 
 
+def test_smoke_accepts_a_bundled_persona_name(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)  # no persona files here, as after `pip install moodsona`
+    assert main(["smoke", "anxious-newcomer", "--turns", "2"]) == 0
+    assert capsys.readouterr().out.startswith("persona anxious-newcomer: 2 turn(s)")
+
+
+def test_smoke_prefers_an_existing_file_over_a_bundled_name(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    other = REPO / "personas" / "examples" / "boundary-tester.yaml"
+    (tmp_path / "anxious-newcomer").write_text(other.read_text("utf-8"), encoding="utf-8")
+    assert main(["smoke", "anxious-newcomer"]) == 0
+    assert capsys.readouterr().out.startswith("persona boundary-tester:")
+
+
+def test_smoke_names_the_bundled_personas_when_nothing_matches(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert main(["smoke", "no-such-persona"]) == 1
+    err = capsys.readouterr().err
+    assert "no-such-persona: no such file" in err
+    assert "anxious-newcomer" in err
+
+
+def test_validate_accepts_bundled_persona_names(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert main(["validate", "anxious-newcomer", "boundary-tester"]) == 0
+    assert "checked 2 persona file(s), 0 problem(s)" in capsys.readouterr().out
+    assert main(["validate", "no-such-persona"]) == 2
+    assert "no-such-persona: no such file or directory" in capsys.readouterr().err
+
+
+def test_bundled_names_fail_cleanly_on_a_broken_install(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def missing() -> Path:
+        raise FileNotFoundError("bundled personas directory not found")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("moodsona.personas.bundled_personas_dir", missing)
+    assert main(["smoke", "anxious-newcomer"]) == 1
+    assert "bundled personas directory not found" in capsys.readouterr().err
+    assert main(["validate", "anxious-newcomer"]) == 2
+    assert "anxious-newcomer: no such file or directory" in capsys.readouterr().err
+
+
 def test_smoke_exit_codes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     bad = tmp_path / "bad.yaml"
     bad.write_text("id: bad\n", encoding="utf-8")

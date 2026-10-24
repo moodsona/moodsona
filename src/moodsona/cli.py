@@ -1,5 +1,8 @@
 """Command line interface: ``moodsona validate`` and ``moodsona smoke``.
 
+Both commands take persona file paths or the ids of bundled personas
+(``moodsona smoke anxious-newcomer``); an existing path wins over an id.
+
 Exit codes:
     0: success.
     1: ``validate`` found problems, or ``smoke`` could not load or run the persona.
@@ -12,11 +15,12 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 from moodsona.companion import EchoCompanion
 from moodsona.llm.base import LLMError
 from moodsona.llm.fake import FakeProvider
-from moodsona.personas import PersonaError, load_persona
+from moodsona.personas import PersonaError, bundled_persona_path, load_persona
 from moodsona.runner import run
 from moodsona.validation import main as validate_main
 
@@ -32,21 +36,48 @@ def _parser() -> argparse.ArgumentParser:
         "validate", help="check persona files (schema, ids, no contact data)"
     )
     check.add_argument(
-        "paths", nargs="*", help="files or directories (default: the bundled personas)"
+        "paths",
+        nargs="*",
+        help="files, directories or bundled persona ids (default: all bundled personas)",
     )
     smoke = commands.add_parser(
         "smoke", help="run a persona offline (fake model, echo companion) and print its mood"
     )
-    smoke.add_argument("persona", help="path to a persona YAML file")
+    smoke.add_argument(
+        "persona", help="path to a persona YAML file, or a bundled persona id (anxious-newcomer)"
+    )
     smoke.add_argument("--days", type=int, default=1, help="simulated days (default: 1)")
     smoke.add_argument("--turns", type=int, default=3, help="turns per day (default: 3)")
     smoke.add_argument("--seed", type=int, default=0, help="random seed (default: 0)")
     return parser
 
 
+def _persona_path(arg: str) -> str:
+    """``arg`` if that path exists, else the file of the bundled persona with id ``arg``.
+
+    Raises:
+        KeyError: ``arg`` is neither (the message lists the bundled ids).
+        FileNotFoundError: ``arg`` does not exist and the bundled personas are missing.
+    """
+    return arg if Path(arg).exists() else str(bundled_persona_path(arg))
+
+
+def _validate(args: argparse.Namespace) -> int:
+    paths: list[str] = []
+    for arg in args.paths:
+        try:
+            paths.append(_persona_path(arg))
+        except (KeyError, FileNotFoundError):
+            paths.append(arg)  # the validator reports it as missing
+    return validate_main(paths)
+
+
 def _smoke(args: argparse.Namespace) -> int:
     try:
-        seed = load_persona(args.persona)
+        seed = load_persona(_persona_path(args.persona))
+    except KeyError as exc:
+        sys.stderr.write(f"{args.persona}: no such file, and {exc.args[0]}\n")
+        return 1
     except (PersonaError, FileNotFoundError) as exc:  # FileNotFoundError: broken install
         sys.stderr.write(f"{exc}\n")
         return 1
@@ -72,7 +103,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run the CLI and return its exit code."""
     args = _parser().parse_args(argv)
     if args.command == "validate":
-        return validate_main(args.paths)
+        return _validate(args)
     return _smoke(args)
 
 
