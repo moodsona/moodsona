@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 from moodsona.companion import Companion
 from moodsona.llm.base import ChatMessage, LLMProvider
 from moodsona.simulator import SafetyHook, Simulator, SimulatorConfig
-from moodsona.state import DayNote, Mood, PersonaSeed
+from moodsona.state import DayNote, Mood, PersonaSeed, Stance
 
 if TYPE_CHECKING:
     from moodsona.lang.base import LanguageProfile
@@ -143,6 +143,69 @@ class Transcript:
         lines += [{"kind": "skipped_day", "day": day} for day in self.skipped_days]
         text = "".join(json.dumps(line, ensure_ascii=False) + "\n" for line in lines)
         Path(path).write_text(text, encoding="utf-8")
+
+    @classmethod
+    def from_jsonl(cls, path: str | PathLike[str]) -> Transcript:
+        """Read a transcript written by :meth:`to_jsonl`.
+
+        Blank lines and lines of an unknown ``kind`` are skipped, so files from
+        newer versions with extra line kinds still load.
+
+        Args:
+            path: A JSONL file.
+
+        Returns:
+            The transcript.
+
+        Raises:
+            OSError: The file cannot be read.
+            ValueError: The first line is not a ``run`` line, or a line is not
+                valid JSON or misses a field (the message names the line).
+        """
+        transcript: Transcript | None = None
+        text = Path(path).read_text(encoding="utf-8")
+        for number, line in enumerate(text.splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                data = json.loads(line)
+                kind = data["kind"]
+                if transcript is None:
+                    if kind != "run":
+                        raise ValueError(f"the first line must be a 'run' line, got {kind!r}")
+                    transcript = cls(
+                        persona_id=str(data["persona_id"]),
+                        rng_seed=int(data["rng_seed"]),
+                        days=data.get("days"),
+                        turns_per_day=data.get("turns_per_day"),
+                    )
+                elif kind == "turn":
+                    transcript.turns.append(_turn_from_dict(data))
+                elif kind == "day_notes":
+                    note = DayNote(int(data["day"]), tuple(data["notes"]), bool(data["ok"]))
+                    transcript.notes.append(note)
+                elif kind == "skipped_day":
+                    transcript.skipped_days.append(int(data["day"]))
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+                raise ValueError(f"{path}:{number}: {exc}") from exc
+        if transcript is None:
+            raise ValueError(f"{path}: no 'run' line")
+        return transcript
+
+
+def _turn_from_dict(data: dict[str, Any]) -> TurnRecord:
+    state = data["state_after"]
+    return TurnRecord(
+        day=int(data["day"]),
+        turn=int(data["turn"]),
+        hidden=data["hidden"],
+        visible=str(data["visible"]),
+        companion_reply=str(data["companion_reply"]),
+        mood=Mood(state["emotion"], state["energy"], Stance(state["stance"])),
+        polluted=bool(data["polluted"]),
+        problems=tuple(data["problems"]),
+        forced=data["forced"],
+    )
 
 
 def run(
