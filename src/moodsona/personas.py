@@ -71,6 +71,12 @@ def list_bundled_personas() -> list[str]:
 def bundled_persona_path(persona_id: str) -> Path:
     """The file of a bundled persona.
 
+    Args:
+        persona_id: The persona's id, e.g. ``"anxious-newcomer"``.
+
+    Returns:
+        The path of its YAML file.
+
     Raises:
         KeyError: No bundled persona has that id.
         FileNotFoundError: The bundled personas directory is missing (a broken install).

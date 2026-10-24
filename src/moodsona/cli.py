@@ -1,7 +1,9 @@
 """Command line interface: ``moodsona validate`` and ``moodsona smoke``.
 
 Both commands take persona file paths or the ids of bundled personas
-(``moodsona smoke anxious-newcomer``); an existing path wins over an id.
+(``moodsona smoke anxious-newcomer``). Only a bare name (no directory part, no
+``.yaml``/``.yml`` suffix) is looked up as an id, and only when no file of that
+name exists (for ``validate``: no file or directory).
 
 Exit codes:
     0: success.
@@ -52,32 +54,41 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _persona_path(arg: str) -> str:
-    """``arg`` if that path exists, else the file of the bundled persona with id ``arg``.
-
-    Raises:
-        KeyError: ``arg`` is neither (the message lists the bundled ids).
-        FileNotFoundError: ``arg`` does not exist and the bundled personas are missing.
-    """
-    return arg if Path(arg).exists() else str(bundled_persona_path(arg))
+def _is_persona_id(arg: str) -> bool:
+    """True for a bare name such as ``anxious-newcomer``: no directory part, no YAML suffix."""
+    path = Path(arg)
+    return path.name == arg and path.suffix not in {".yaml", ".yml"}
 
 
 def _validate(args: argparse.Namespace) -> int:
     paths: list[str] = []
     for arg in args.paths:
+        if Path(arg).exists() or not _is_persona_id(arg):
+            paths.append(arg)
+            continue
         try:
-            paths.append(_persona_path(arg))
-        except (KeyError, FileNotFoundError):
-            paths.append(arg)  # the validator reports it as missing
+            paths.append(str(bundled_persona_path(arg)))
+        except KeyError as exc:
+            sys.stderr.write(f"{arg}: no such file or directory, and {exc.args[0]}\n")
+            return 2
+        except FileNotFoundError:  # broken install: the validator reports the missing path
+            paths.append(arg)
     return validate_main(paths)
 
 
 def _smoke(args: argparse.Namespace) -> int:
+    path = args.persona
     try:
-        seed = load_persona(_persona_path(args.persona))
+        if not Path(path).is_file() and _is_persona_id(path):
+            path = str(bundled_persona_path(path))
     except KeyError as exc:
         sys.stderr.write(f"{args.persona}: no such file, and {exc.args[0]}\n")
         return 1
+    except FileNotFoundError as exc:  # broken install
+        sys.stderr.write(f"{exc}\n")
+        return 1
+    try:
+        seed = load_persona(path)
     except (PersonaError, FileNotFoundError) as exc:  # FileNotFoundError: broken install
         sys.stderr.write(f"{exc}\n")
         return 1

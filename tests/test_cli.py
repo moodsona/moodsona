@@ -122,6 +122,31 @@ def test_smoke_names_the_bundled_personas_when_nothing_matches(
     assert "anxious-newcomer" in err
 
 
+def test_smoke_ignores_a_directory_named_like_a_bundled_persona(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "boundary-tester").mkdir()
+    assert main(["smoke", "boundary-tester", "--turns", "1"]) == 0
+    assert capsys.readouterr().out.startswith("persona boundary-tester:")
+
+
+@pytest.mark.parametrize("arg", ["typo.yaml", "anxious-newcomer.yml", "sub/anxious-newcomer"])
+def test_paths_are_never_looked_up_as_ids(
+    arg: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert main(["smoke", arg]) == 1
+    err = capsys.readouterr().err
+    assert "cannot read YAML" in err
+    assert "known:" not in err
+    assert main(["validate", arg]) == 2
+    assert capsys.readouterr().err == f"{arg}: no such file or directory\n"
+
+
 def test_validate_accepts_bundled_persona_names(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -129,7 +154,9 @@ def test_validate_accepts_bundled_persona_names(
     assert main(["validate", "anxious-newcomer", "boundary-tester"]) == 0
     assert "checked 2 persona file(s), 0 problem(s)" in capsys.readouterr().out
     assert main(["validate", "no-such-persona"]) == 2
-    assert "no-such-persona: no such file or directory" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "no-such-persona: no such file or directory" in err
+    assert "anxious-newcomer" in err  # the known ids are listed
 
 
 def test_bundled_names_fail_cleanly_on_a_broken_install(
