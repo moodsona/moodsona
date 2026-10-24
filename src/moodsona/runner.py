@@ -149,7 +149,7 @@ class Transcript:
         """Read a transcript written by :meth:`to_jsonl`.
 
         Blank lines and lines of an unknown ``kind`` are skipped, so files from
-        newer versions with extra line kinds still load.
+        newer versions with extra line kinds still load. One file holds one run.
 
         Args:
             path: A JSONL file.
@@ -159,31 +159,35 @@ class Transcript:
 
         Raises:
             OSError: The file cannot be read.
-            ValueError: The first line is not a ``run`` line, or a line is not
-                valid JSON or misses a field (the message names the line).
+            ValueError: The first line is not a ``run`` line, there is a second
+                ``run`` line, or a line is not valid JSON, misses a field or has
+                a field of the wrong type (the message names the line).
         """
         transcript: Transcript | None = None
         text = Path(path).read_text(encoding="utf-8")
-        for number, line in enumerate(text.splitlines(), start=1):
+        # Split on "\n" only: to_jsonl keeps characters such as U+2028 unescaped,
+        # and str.splitlines() would break a line inside a JSON string there.
+        for number, line in enumerate(text.split("\n"), start=1):
             if not line.strip():
                 continue
             try:
                 data = json.loads(line)
+                _require(isinstance(data, dict), "not a JSON object")
                 kind = data["kind"]
                 if transcript is None:
-                    if kind != "run":
-                        raise ValueError(f"the first line must be a 'run' line, got {kind!r}")
+                    _require(kind == "run", f"the first line must be a 'run' line, got {kind!r}")
                     transcript = cls(
                         persona_id=str(data["persona_id"]),
                         rng_seed=int(data["rng_seed"]),
                         days=data.get("days"),
                         turns_per_day=data.get("turns_per_day"),
                     )
+                elif kind == "run":
+                    raise ValueError("a second 'run' line; one file holds one run")
                 elif kind == "turn":
                     transcript.turns.append(_turn_from_dict(data))
                 elif kind == "day_notes":
-                    note = DayNote(int(data["day"]), tuple(data["notes"]), bool(data["ok"]))
-                    transcript.notes.append(note)
+                    transcript.notes.append(_note_from_dict(data))
                 elif kind == "skipped_day":
                     transcript.skipped_days.append(int(data["day"]))
             except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
@@ -193,19 +197,50 @@ class Transcript:
         return transcript
 
 
+def _require(condition: bool, problem: str) -> None:
+    if not condition:
+        raise ValueError(problem)
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def _turn_from_dict(data: dict[str, Any]) -> TurnRecord:
+    hidden = data["hidden"]
+    _require(hidden is None or isinstance(hidden, dict), "hidden must be an object or null")
+    if hidden is not None:
+        rules = hidden.get("rules_triggered", [])
+        _require(
+            isinstance(rules, list) and all(map(_is_int, rules)),
+            "hidden.rules_triggered must be a list of integers",
+        )
+    problems, forced = data["problems"], data["forced"]
+    _require(isinstance(data["polluted"], bool), "polluted must be true or false")
+    _require(isinstance(problems, list), "problems must be a list")
+    _require(forced is None or isinstance(forced, str), "forced must be a string or null")
     state = data["state_after"]
     return TurnRecord(
         day=int(data["day"]),
         turn=int(data["turn"]),
-        hidden=data["hidden"],
+        hidden=hidden,
         visible=str(data["visible"]),
         companion_reply=str(data["companion_reply"]),
         mood=Mood(state["emotion"], state["energy"], Stance(state["stance"])),
-        polluted=bool(data["polluted"]),
-        problems=tuple(data["problems"]),
-        forced=data["forced"],
+        polluted=data["polluted"],
+        problems=tuple(problems),
+        forced=forced,
     )
+
+
+def _note_from_dict(data: dict[str, Any]) -> DayNote:
+    lines = data["notes"]
+    _require(
+        isinstance(lines, list) and all(isinstance(x, str) for x in lines),
+        "notes must be a list of strings",
+    )
+    _require(isinstance(data["ok"], bool), "ok must be true or false")
+    return DayNote(int(data["day"]), tuple(lines), data["ok"])
 
 
 def run(

@@ -8,11 +8,14 @@ models, personas or seeds; a single run's numbers say little on their own.
 
 What is counted over what:
 
-* **Trajectory** (``emotion``, ``energy``, ``stance_changes_per_day``): every
-  turn, including polluted ones (their state is the unchanged previous state).
-* **Message metrics** (intents, rule triggers, repeats, agreement, ask-back,
-  length, wrong language): only the turns that are not polluted, because a
-  polluted turn carries the simulator's fallback line, not the model's.
+* Everything except the counts (``turns``, ``active_days``, ``days_skipped``)
+  and the polluted / forced shares is computed over the **messages**: the
+  turns that are not polluted. A polluted turn carries the simulator's
+  fallback line, not the model's, and only repeats the previous state, which
+  would damp the volatility of a model that fails often.
+* Text metrics read the visible message, after typing noise if
+  ``SimulatorConfig.typing_noise`` was on (the simulator's rails see the text
+  before the noise, so with noise on the two can differ).
 * A rate is None when there is nothing to count (no turns, no messages, or no
   language profile), never a misleading 0.
 
@@ -26,6 +29,7 @@ from collections import Counter
 from dataclasses import asdict, dataclass, field
 from itertools import pairwise
 from os import PathLike
+from statistics import fmean
 from typing import Any
 
 from moodsona.checks import repeats_earlier
@@ -36,6 +40,8 @@ from moodsona.state import Intent
 
 #: Messages with at most this many words count as short.
 SHORT_MAX_WORDS = 3
+#: Key in ``intent_shares`` for messages whose intent is missing or unknown.
+OTHER_INTENT = "other"
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,11 +49,11 @@ class SeriesSummary:
     """Summary of one score (emotion or energy) over a run.
 
     Attributes:
-        mean: Mean value over all turns; None without turns.
+        mean: Mean value; None without points.
         drift_per_day: Least-squares slope of the value against the day
-            number, in points per day; None with fewer than two active days.
-        volatility: Mean absolute change between consecutive turns (across
-            day boundaries too); None with fewer than two turns.
+            number, in points per day; None with fewer than two distinct days.
+        volatility: Mean absolute change between consecutive points (across
+            day boundaries too); None with fewer than two points.
     """
 
     mean: float | None
@@ -67,8 +73,9 @@ class TranscriptMetrics:
         days_skipped: Days the persona chose not to write.
         emotion: Emotion trajectory summary.
         energy: Energy trajectory summary.
-        intent_shares: Share of messages per intent, every intent listed
-            (empty without messages).
+        intent_shares: Share of messages per intent, every intent listed,
+            plus ``"other"`` when some intent is missing or unknown (empty
+            without messages).
         rule_trigger_rate: Share of messages whose hidden block reports at
             least one triggered reaction rule.
         rule_counts: How often each rule number was reported, as the model
@@ -81,7 +88,7 @@ class TranscriptMetrics:
         short_message_share: Share of messages with at most
             ``short_max_words`` words.
         wrong_language_share: Share of messages in another language.
-        stance_changes_per_day: Stance changes between consecutive turns,
+        stance_changes_per_day: Stance changes between consecutive messages,
             divided by the active days.
         polluted_share: Share of turns that fell back to the neutral line.
         forced_share: Share of turns accepted despite a soft rail.
@@ -115,7 +122,7 @@ class TranscriptMetrics:
 
 
 def _mean(values: list[float]) -> float | None:
-    return sum(values) / len(values) if values else None
+    return fmean(values) if values else None
 
 
 def _share(flags: list[bool]) -> float | None:
@@ -147,9 +154,12 @@ def summarize_series(points: list[tuple[int, int]]) -> SeriesSummary:
 def _own_repeats(messages: list[TurnRecord]) -> list[bool]:
     """For each message, whether it nearly repeats an earlier message of the same day."""
     flags: list[bool] = []
+    today: list[str] = []
     for i, record in enumerate(messages):
-        earlier = [m.visible for m in messages[:i] if m.day == record.day]
-        flags.append(repeats_earlier(record.visible, earlier))
+        if i and record.day != messages[i - 1].day:
+            today = []
+        flags.append(repeats_earlier(record.visible, today))
+        today.append(record.visible)
     return flags
 
 
@@ -176,24 +186,26 @@ def compute_metrics(
     profile = get_profile(language) if isinstance(language, str) else language
     turns = transcript.turns
     messages = [t for t in turns if not t.polluted and t.hidden is not None]
-    hidden = [t.hidden for t in messages if t.hidden is not None]
+    hidden = [t.hidden for t in messages if t.hidden is not None]  # the same, typed for mypy
     active_days = len({t.day for t in turns})
 
     intents = Counter(str(h.get("intent")) for h in hidden)
-    intent_shares = {i.value: intents[i.value] / len(hidden) for i in Intent} if hidden else {}
+    intent_shares = {i.value: intents.pop(i.value, 0) / len(hidden) for i in Intent if hidden}
+    if intents:  # missing or unknown intents (e.g. from a newer version's file)
+        intent_shares[OTHER_INTENT] = intents.total() / len(hidden)
     reported = [list(h.get("rules_triggered") or []) for h in hidden]
     rule_counts = Counter(n for numbers in reported for n in numbers)
 
     texts = [t.visible for t in messages]
-    stance_changes = sum(a.mood.stance != b.mood.stance for a, b in pairwise(turns))
+    stance_changes = sum(a.mood.stance != b.mood.stance for a, b in pairwise(messages))
     return TranscriptMetrics(
         persona_id=transcript.persona_id,
         turns=len(turns),
         messages=len(messages),
         active_days=active_days,
         days_skipped=len(transcript.skipped_days),
-        emotion=summarize_series([(t.day, t.mood.emotion) for t in turns]),
-        energy=summarize_series([(t.day, t.mood.energy) for t in turns]),
+        emotion=summarize_series([(t.day, t.mood.emotion) for t in messages]),
+        energy=summarize_series([(t.day, t.mood.energy) for t in messages]),
         intent_shares=intent_shares,
         rule_trigger_rate=_share([bool(numbers) for numbers in reported]),
         rule_counts=dict(sorted(rule_counts.items())),

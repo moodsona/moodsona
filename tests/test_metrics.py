@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,8 @@ from moodsona.metrics import (
 from moodsona.runner import Transcript, TurnRecord, run
 from moodsona.state import DayNote, Intent, Mood, Stance
 from support import make_seed
+
+RUN = '{"kind": "run", "persona_id": "x", "rng_seed": 0}\n'
 
 
 def turn(
@@ -99,7 +102,8 @@ def test_jsonl_round_trip(tmp_path: Path) -> None:
         ('{"kind": "turn"}\n', "first line must be"),
         ('{"kind": "run", "persona_id": "x", "rng_seed": 0}\nnot json\n', ":2:"),
         ('{"kind": "run", "persona_id": "x", "rng_seed": 0}\n{"kind": "turn", "day": 1}\n', ":2:"),
-        ('{"kind": "run", "persona_id": "x", "rng_seed": 0}\n[1]\n', ":2:"),
+        (RUN + "[1]\n", "not a JSON object"),
+        (RUN + RUN, "second 'run' line"),
     ],
 )
 def test_from_jsonl_rejects_broken_files(tmp_path: Path, text: str, message: str) -> None:
@@ -107,6 +111,44 @@ def test_from_jsonl_rejects_broken_files(tmp_path: Path, text: str, message: str
     path.write_text(text, encoding="utf-8")
     with pytest.raises(ValueError, match=message):
         Transcript.from_jsonl(path)
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"hidden": [1]}, "hidden must be an object or null"),
+        ({"hidden": {"intent": "reply", "rules_triggered": [1, "2"]}}, "list of integers"),
+        ({"polluted": "false"}, "polluted must be true or false"),
+        ({"problems": "too_long"}, "problems must be a list"),
+        ({"forced": 3}, "forced must be a string or null"),
+    ],
+)
+def test_from_jsonl_checks_field_types(
+    tmp_path: Path, change: dict[str, Any], message: str
+) -> None:
+    line = {**sample().turns[0].as_dict(), **change}
+    path = tmp_path / "bad.jsonl"
+    path.write_text(RUN + json.dumps(line) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
+        Transcript.from_jsonl(path)
+
+
+@pytest.mark.parametrize(
+    "notes", [{"notes": "bus late", "ok": True}, {"notes": ["bus late"], "ok": "yes"}]
+)
+def test_from_jsonl_checks_day_notes(tmp_path: Path, notes: dict[str, Any]) -> None:
+    path = tmp_path / "bad.jsonl"
+    path.write_text(RUN + json.dumps({"kind": "day_notes", "day": 1, **notes}), encoding="utf-8")
+    with pytest.raises(ValueError, match=":2:"):
+        Transcript.from_jsonl(path)
+
+
+def test_jsonl_round_trip_keeps_unicode_line_separators(tmp_path: Path) -> None:
+    transcript = sample()
+    transcript.turns[0] = replace(transcript.turns[0], companion_reply="one\u2028two\x85three")
+    path = tmp_path / "run.jsonl"
+    transcript.to_jsonl(path)
+    assert Transcript.from_jsonl(path) == transcript
 
 
 def test_from_jsonl_ignores_blank_lines_and_unknown_kinds(tmp_path: Path) -> None:
@@ -125,13 +167,12 @@ def test_metrics_on_a_hand_built_transcript() -> None:
     m = compute_metrics(sample())
     assert m.persona_id == "test-gardener"
     assert (m.turns, m.messages, m.active_days, m.days_skipped) == (6, 5, 2, 1)
-    # Trajectory over all six turns (the polluted one kept its state).
-    assert m.emotion.mean == pytest.approx((40 + 42 + 44 + 44 + 50 + 52) / 6)
-    assert m.emotion.volatility == pytest.approx((2 + 2 + 0 + 6 + 2) / 5)
-    assert m.energy.volatility == pytest.approx((2 + 8 + 0 + 20 + 4) / 5)
+    # Everything below is over the five messages; the polluted turn is left out.
+    assert m.emotion.mean == pytest.approx((40 + 42 + 44 + 50 + 52) / 5)
+    assert m.emotion.volatility == pytest.approx((2 + 2 + 6 + 2) / 4)
+    assert m.energy.volatility == pytest.approx((2 + 8 + 20 + 4) / 4)
     assert m.emotion.drift_per_day is not None
     assert m.emotion.drift_per_day > 0
-    # Message metrics over the five non-polluted turns.
     assert m.intent_shares == {
         "reply": 0.6,
         "short_reply": 0.2,
@@ -152,6 +193,14 @@ def test_metrics_on_a_hand_built_transcript() -> None:
     assert m.stance_changes_per_day == pytest.approx(0.5)  # one change over two active days
     assert m.polluted_share == pytest.approx(1 / 6)
     assert m.forced_share == pytest.approx(1 / 6)
+
+
+def test_unknown_intents_are_counted_as_other() -> None:
+    transcript = sample()
+    transcript.turns[1] = turn(1, 2, "yeah", intent="sing_a_song")
+    shares = compute_metrics(transcript).intent_shares
+    assert shares["other"] == pytest.approx(0.2)
+    assert sum(shares.values()) == pytest.approx(1)
 
 
 def test_metrics_of_an_empty_transcript_are_none_not_zero() -> None:
@@ -181,7 +230,7 @@ def test_to_dict_is_json_ready_and_complete(tmp_path: Path) -> None:
     data = compute_metrics(sample()).to_dict()
     assert json.loads(json.dumps(data)) == data
     assert data["rule_counts"] == {"1": 2, "2": 1}
-    assert data["emotion"]["mean"] == pytest.approx(272 / 6)
+    assert data["emotion"]["mean"] == pytest.approx(228 / 5)
     path = tmp_path / "run.jsonl"
     sample().to_jsonl(path)
     assert metrics_from_jsonl(path).to_dict() == data

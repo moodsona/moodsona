@@ -187,8 +187,8 @@ least-squares drift per day, mean absolute change per turn), the share of each
 intent, how often reaction rules were reported, own repeats within a day,
 bare agreement, asking back, message length, wrong-language messages, stance
 changes per active day, skipped days, and the polluted and forced shares.
-Message metrics leave polluted turns out, because those carry the fallback
-line rather than the model's. These numbers say how well the user model held
+Polluted turns are left out of everything but their own share, because they
+carry the fallback line and the previous state rather than the model's. These numbers say how well the user model held
 the persona, which is what a comparison of user models needs; they say
 nothing direct about the companion.
 
