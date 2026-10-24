@@ -109,6 +109,29 @@ can check that a new persona loads and its state moves. Both exit with 0 on
 success, 1 when problems are found or the run fails, and 2 on a usage error.
 Run `moodsona <command> --help` for options.
 
+### Fidelity check (experimental)
+
+Can a simple classifier tell simulated users from real ones? Bring your own
+consented reference conversations (moodsona ships none):
+
+```python
+import moodsona
+from moodsona.fidelity import classifier_two_sample_test
+
+persona = moodsona.load_bundled_persona("anxious-newcomer")
+provider = moodsona.FakeProvider()  # placeholder text: swap in a real provider
+runs = [moodsona.run(persona, provider, MyBot(), 2, 3, rng_seed=s) for s in range(10)]
+simulated = [transcript.visible_history() for transcript in runs]
+reference = load_my_conversations()  # yours: lists of moodsona.ChatMessage
+result = classifier_two_sample_test(reference, simulated, seed=0)
+print(result.accuracy, result.p_value, result.weights)  # 0.5 = cannot tell apart
+```
+
+With `FakeProvider` every run is the same placeholder text, so this only shows
+the wiring; use a real provider (see Quickstart) to check a real simulator.
+It is a statistical screen on eight surface features, not proof of realism;
+see [docs/METHOD.md](docs/METHOD.md#fidelity-check-experimental).
+
 ## Personas
 
 The example personas live in [`personas/examples/`](personas/examples/).
@@ -134,7 +157,8 @@ write your own persona, see [docs/personas.md](docs/personas.md).
   day memory, JSONL trajectories, Anthropic/OpenAI/fake providers, CLI, example
   personas.
 - **v0.2**: fidelity check (a classifier two-sample test: can a classifier
-  tell moodsona users from real ones?); a leaderboard of which models hold a
+  tell moodsona users from real ones? An experimental first cut is in
+  `moodsona.fidelity`); a leaderboard of which models hold a
   persona longest; adapters for
   [langwatch/scenario](https://github.com/langwatch/scenario) and
   [promptfoo](https://github.com/promptfoo/promptfoo).

@@ -180,6 +180,61 @@ The JSONL is meant to be read by people as well as by scripts. Reading the
 inner thoughts next to the bot's replies is often the fastest way to find the
 problem.
 
+## Fidelity check (experimental)
+
+`moodsona.fidelity.classifier_two_sample_test(reference, simulated)` asks one
+question: can a simple classifier tell your simulated users from real ones?
+It is a first cut; the API and the features may change.
+
+You bring the reference set: real conversations you hold and are allowed to
+use. moodsona ships none. Both sets are lists of conversations in the
+`Transcript.visible_history()` format (`user` is the person, `assistant` the
+companion).
+
+What it does:
+
+1. **Features.** Every user message becomes eight numbers: length (`log1p`
+   of the characters), share of punctuation, number of question marks,
+   whether the first letter is lower case, whether there is an emoji (a code
+   point range heuristic), type/token ratio, share of first-person singular
+   words (`i`, `me`, `my`, `i'm` ...; English only), and word overlap
+   (Jaccard) with the companion's previous message. The docstring of
+   `message_features` lists the exact definitions.
+2. **Classifier.** A logistic regression with L2 regularisation, fitted by
+   plain gradient descent in pure Python, on features standardised with the
+   training data only. Each set gets equal weight in training.
+3. **Grouped k-fold.** All messages of one conversation go to the same fold
+   (5 by default), so the classifier is never tested on a conversation it
+   partly saw in training. Every fold holds conversations from both sets.
+4. **Balanced accuracy.** The score is the mean of the per-set recall on the
+   held-out messages. With sets of different sizes, plain accuracy rewards
+   always guessing the bigger set; balanced accuracy puts that at 0.5.
+5. **Permutation p-value.** The set labels are shuffled between conversations
+   (each set keeps its number of conversations) and the whole
+   cross-validation runs again, 200 times by default. The p-value is the
+   share of shuffles, counting the real labels as one, that score at least as
+   high as the real labels.
+
+Everything is seeded, so the same inputs and `seed` give the same result.
+
+How to read it:
+
+- **Accuracy near 0.5 and a large p-value**: the classifier cannot tell the
+  sets apart *on these eight features*. That is all it says.
+- **High accuracy and a small p-value**: it can. `result.weights` shows how:
+  each weight belongs to a standardised feature, a positive weight means
+  "more typical of the simulated set", and the largest absolute weights are
+  what gives the simulator away (for example tidier capitalisation or fewer
+  first-person words).
+- The test is only as strong as the reference set. A few dozen conversations
+  from one context make a weak and narrow test.
+
+It is a statistical screen, not proof of realism. Passing it says nothing
+about meaning, safety or emotional realism: messages can match real users'
+punctuation and length while saying things no real user would say. A
+stronger classifier, or other features, may well separate sets this one
+cannot.
+
 ## Prior work
 
 moodsona's mechanics follow ideas described in the papers below. **The project
@@ -210,13 +265,12 @@ idea is wrong, please open an issue.
   (`SimulatorConfig.typing_noise`, off by default) reduce this, but do not
   remove it. Treat results as "how the bot behaves with this kind of user", not
   "how real users will feel".
-- **Fidelity is not measured yet.** v0.2 adds a fidelity check: a classifier
-  two-sample test that trains a classifier to separate simulated messages from
-  real ones. If it cannot do better than chance on held-out data, the
-  simulator is close to real users along what the classifier sees; if it can,
-  you learn which features give it away. You will need your own consented
-  human reference data to run it. moodsona will not ship real user
-  conversations.
+- **Fidelity is only screened, and only experimentally.** The
+  [fidelity check](#fidelity-check-experimental) is a first cut: a classifier
+  two-sample test on eight surface features of each message. Chance-level
+  accuracy means the simulator is close to real users along what this
+  classifier sees, nothing more. You need your own consented human reference
+  data to run it; moodsona will not ship real user conversations.
 - **Rule matching is approximate.** Whether "the bot gives generic advice"
   happened is a judgement made by the user model when it reports
   `rules_triggered`. Rules with vague `when` text fire inconsistently.
@@ -243,8 +297,8 @@ idea is wrong, please open an issue.
   a model to generate one. The validator rejects contact data and URLs in
   persona text as a first line of defence.
 - **No real user data.** moodsona does not collect, ship or require real
-  conversations. The v0.2 fidelity check will run on data you hold and are
-  allowed to use.
+  conversations. The experimental fidelity check runs on reference data you
+  hold and are allowed to use; it runs locally and sends nothing anywhere.
 - **Not a clinical tool.** moodsona does not diagnose, treat or assess anyone,
   and its scores are not evidence that a bot is safe or helpful for people in
   distress.
