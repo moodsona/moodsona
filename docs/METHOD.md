@@ -180,6 +180,27 @@ The JSONL is meant to be read by people as well as by scripts. Reading the
 inner thoughts next to the bot's replies is often the fastest way to find the
 problem.
 
+## Prior work
+
+moodsona's mechanics follow ideas described in the papers below. **The project
+used no code, prompts or data from any of them.** Everything here was written
+from the published descriptions. Where a project's data license is
+incompatible with ours, we did not download the data at all.
+
+| Work | What we took as an idea | What we did NOT take |
+|---|---|---|
+| SAGE ([arXiv 2505.02847](https://arxiv.org/abs/2505.02847)) | The simulated user's emotional state as a numeric signal updated every turn and used to judge the agent | Code, prompts, data, scoring scale, leaderboard |
+| RLVER ([arXiv 2507.03112](https://arxiv.org/abs/2507.03112)) | A simulated user with a persona, a goal and an emotion score that reacts to the agent and can serve as a signal | The reinforcement-learning setup, model weights, prompts, code; moodsona does not train models |
+| MindEval ([SWORDHealth/mind-eval](https://github.com/SWORDHealth/mind-eval)) | Evaluating over several sessions, with the simulated person remembering earlier ones | Its data (licensed CC BY-NC-SA, which is incompatible with our CC BY 4.0, so it was not used), patient profiles, clinical framing and rubrics |
+| HumanLM ([arXiv 2603.03303](https://arxiv.org/abs/2603.03303)) | Writing hidden beliefs and emotions before each reply, so the simulated person stays consistent | The training method, models and data |
+| CompanionBench ([arXiv 2608.02046](https://arxiv.org/abs/2608.02046)) | Hidden disclosure: the user reveals what matters only to a bot that earns it (in v0.1 through a never-stated hidden goal and the persona's rules, not a separate gate); "surface warmth instead of substantive support" as the failure to look for | Scenarios, rubrics, judge prompts, data |
+| RealSim ([arXiv 2605.02624](https://arxiv.org/abs/2605.02624)) | Measuring simulator fidelity along several separate axes rather than one score | Datasets, code, metric implementations |
+| SAP / mirrorbench | Comparing simulated and human users side by side, including whether they can be told apart | Code, data, benchmark tasks |
+| Templatic empathy ([arXiv 2604.08479](https://arxiv.org/abs/2604.08479)), EIBench ([arXiv 2606.15532](https://arxiv.org/abs/2606.15532)) | Motivation only: why an LLM user must push and vary | Nothing else |
+
+If you are an author of one of these works and think the description of your
+idea is wrong, please open an issue.
+
 ## Fidelity check (experimental)
 
 `moodsona.fidelity.classifier_two_sample_test(reference, simulated)` asks one
@@ -275,27 +296,6 @@ about meaning, safety or emotional realism: messages can match real users'
 punctuation and length while saying things no real user would say. A
 stronger classifier, or other features, may well separate sets this one
 cannot.
-
-## Prior work
-
-moodsona's mechanics follow ideas described in the papers below. **The project
-used no code, prompts or data from any of them.** Everything here was written
-from the published descriptions. Where a project's data license is
-incompatible with ours, we did not download the data at all.
-
-| Work | What we took as an idea | What we did NOT take |
-|---|---|---|
-| SAGE ([arXiv 2505.02847](https://arxiv.org/abs/2505.02847)) | The simulated user's emotional state as a numeric signal updated every turn and used to judge the agent | Code, prompts, data, scoring scale, leaderboard |
-| RLVER ([arXiv 2507.03112](https://arxiv.org/abs/2507.03112)) | A simulated user with a persona, a goal and an emotion score that reacts to the agent and can serve as a signal | The reinforcement-learning setup, model weights, prompts, code; moodsona does not train models |
-| MindEval ([SWORDHealth/mind-eval](https://github.com/SWORDHealth/mind-eval)) | Evaluating over several sessions, with the simulated person remembering earlier ones | Its data (licensed CC BY-NC-SA, which is incompatible with our CC BY 4.0, so it was not used), patient profiles, clinical framing and rubrics |
-| HumanLM ([arXiv 2603.03303](https://arxiv.org/abs/2603.03303)) | Writing hidden beliefs and emotions before each reply, so the simulated person stays consistent | The training method, models and data |
-| CompanionBench ([arXiv 2608.02046](https://arxiv.org/abs/2608.02046)) | Hidden disclosure: the user reveals what matters only to a bot that earns it (in v0.1 through a never-stated hidden goal and the persona's rules, not a separate gate); "surface warmth instead of substantive support" as the failure to look for | Scenarios, rubrics, judge prompts, data |
-| RealSim ([arXiv 2605.02624](https://arxiv.org/abs/2605.02624)) | Measuring simulator fidelity along several separate axes rather than one score | Datasets, code, metric implementations |
-| SAP / mirrorbench | Comparing simulated and human users side by side, including whether they can be told apart | Code, data, benchmark tasks |
-| Templatic empathy ([arXiv 2604.08479](https://arxiv.org/abs/2604.08479)), EIBench ([arXiv 2606.15532](https://arxiv.org/abs/2606.15532)) | Motivation only: why an LLM user must push and vary | Nothing else |
-
-If you are an author of one of these works and think the description of your
-idea is wrong, please open an issue.
 
 ## Limitations
 

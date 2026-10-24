@@ -109,7 +109,7 @@ can check that a new persona loads and its state moves. Both exit with 0 on
 success, 1 when problems are found or the run fails, and 2 on a usage error.
 Run `moodsona <command> --help` for options.
 
-### Fidelity check (experimental)
+## Fidelity check (experimental)
 
 Can a simple classifier tell simulated users from real ones? Bring your own
 consented reference conversations (moodsona ships none):
