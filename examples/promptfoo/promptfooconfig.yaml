@@ -1,0 +1,58 @@
+# moodsona inside promptfoo: each test case is one multi-day moodsona run.
+# Offline and free: the fake user model and the echo companion. See
+# docs/integrations/promptfoo.md. Run it from this folder:
+#
+#   npx promptfoo@latest eval
+#
+# The Python that promptfoo runs must have moodsona installed (see
+# pythonExecutable below).
+
+description: moodsona personas against a companion (offline example)
+
+# promptfoo needs a prompt. moodsona ignores it (the persona writes the
+# user's lines); it only labels the results table.
+prompts:
+  - "moodsona: {{persona}}"
+
+providers:
+  - id: file://provider.py
+    label: moodsona
+    config:
+      # pythonExecutable: ../../.venv/bin/python  # Windows: ../../.venv/Scripts/python.exe
+      persona: anxious-newcomer       # a bundled persona id or a persona YAML path
+      companion: moodsona:EchoCompanion  # import path of your companion class
+      companion_args:                 # keyword arguments for it
+        prefix: "You said: "
+      provider: fake                  # fake | anthropic | openai (paid: needs allow_paid)
+      days: 2
+      turns_per_day: 3
+      seed: 0
+
+# Checked on every test case. `output` is the object the provider returns.
+defaultTest:
+  assert:
+    - type: javascript
+      value: output.metrics.polluted_share === 0
+    - type: javascript
+      value: output.metrics.forced_share <= 0.2
+    - type: javascript
+      value: output.metrics.own_repeat_rate <= 0.2
+
+tests:
+  - description: the default persona
+    vars:
+      persona: anxious-newcomer
+    assert:
+      - type: javascript
+        value: output.metrics.turns === 6
+      - type: javascript
+        value: output.transcript.length === 12
+  - description: another bundled persona, one day longer
+    vars:
+      persona: lonely-night-owl
+      days: 3
+    assert:
+      - type: javascript
+        value: output.metrics.days_skipped <= 1
+      - type: javascript
+        value: output.metrics.active_days >= 2
