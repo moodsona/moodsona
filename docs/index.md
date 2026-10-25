@@ -8,6 +8,7 @@ a quickstart.
   day memory), how it relates to prior research, limitations and ethical notes.
 - [Writing a persona](personas.md): field-by-field guide to the persona
   format, how to design reaction rules, how to test and submit a persona.
+- [Persona ideas](persona-ideas.md): short briefs to turn into a first persona.
 - [Contributing](../CONTRIBUTING.md): development setup, commit rules, DCO,
   AI-assisted contributions.
 
