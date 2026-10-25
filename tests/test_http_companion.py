@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import threading
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -18,6 +19,7 @@ from moodsona.companion import (
     HttpCompanion,
     HttpCompanionError,
     OpenAICompatibleCompanion,
+    _is_loopback,
 )
 from moodsona.llm.base import ChatMessage
 from moodsona.llm.fake import FakeProvider
@@ -57,9 +59,8 @@ class LocalServer:
 
 
 @pytest.fixture
-def server(monkeypatch: pytest.MonkeyPatch) -> Iterator[LocalServer]:
-    # Keep any configured HTTP proxy out of the way of 127.0.0.1.
-    monkeypatch.setenv("no_proxy", "*")
+def server() -> Iterator[LocalServer]:
+    # No no_proxy here: loopback targets must bypass any configured proxy by themselves.
     state = LocalServer()
 
     class Handler(BaseHTTPRequestHandler):
@@ -169,7 +170,7 @@ def test_http_error_names_url_and_status_but_not_headers(server: LocalServer) ->
 
 def test_invalid_header_value_is_not_quoted(server: LocalServer) -> None:
     companion = HttpCompanion(server.url, headers={"Authorization": f"{HIDDEN}\nX-Injected: 1"})
-    with pytest.raises(HttpCompanionError, match="invalid request headers") as info:
+    with pytest.raises(HttpCompanionError, match="HTTP does not allow") as info:
         companion.reply(HISTORY)
     assert HIDDEN not in str(info.value)
     assert info.value.__cause__ is None
@@ -240,11 +241,16 @@ def test_timeout(server: LocalServer) -> None:
     assert info.value.status is None
 
 
-def test_connection_refused(server: LocalServer) -> None:
-    # Find a port nothing listens on: bind one, then close it.
+def dead_port() -> int:
+    """A port nothing listens on: bind one, then close it."""
     probe = ThreadingHTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler)
     port = probe.server_address[1]
     probe.server_close()
+    return port
+
+
+def test_connection_refused() -> None:
+    port = dead_port()
     companion = HttpCompanion(f"http://127.0.0.1:{port}/chat")
     with pytest.raises(HttpCompanionError, match=f"127.0.0.1:{port}/chat"):
         companion.reply(HISTORY)
@@ -264,6 +270,114 @@ def test_bad_url_is_rejected(url: str) -> None:
     with pytest.raises(ValueError, match="URL") as info:
         HttpCompanion(url)
     assert "password" not in str(info.value)
+
+
+@pytest.mark.parametrize("url", ["http://127.0.0.1/café", "http://127.0.0.1/a\u00a0b"])
+def test_non_ascii_url_is_rejected(url: str) -> None:
+    with pytest.raises(ValueError, match="non-ASCII"):
+        HttpCompanion(url)
+
+
+def test_non_latin1_header_gets_a_neutral_error(server: LocalServer) -> None:
+    companion = HttpCompanion(server.url, headers={"X-Name": "Zoë ☕"})
+    with pytest.raises(HttpCompanionError, match="HTTP does not allow") as info:
+        companion.reply(HISTORY)
+    assert "Zo" not in str(info.value)
+
+
+def test_url_and_timeout_are_read_only() -> None:
+    companion = HttpCompanion("http://127.0.0.1/chat", timeout=5)
+    assert companion.url == "http://127.0.0.1/chat"
+    assert companion.timeout == 5
+    with pytest.raises(AttributeError):
+        companion.url = "file:///etc/passwd"  # type: ignore[misc]
+    with pytest.raises(AttributeError):
+        companion.timeout = 0  # type: ignore[misc]
+
+
+def test_file_url_is_unreachable_even_after_poking_internals(tmp_path: Path) -> None:
+    page = tmp_path / "reply.json"
+    page.write_text('{"reply": "read from disk"}', encoding="utf-8")
+    companion = HttpCompanion("http://127.0.0.1/chat")
+    # Bypass any property or validation, as a careless caller could.
+    vars(companion).update(url=page.as_uri(), _url=page.as_uri())
+    with pytest.raises(HttpCompanionError, match="request failed"):
+        companion.reply(HISTORY)
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["localhost", "LOCALHOST", "127.0.0.1", "127.8.9.10", "::1"],
+)
+def test_loopback_hosts(host: str) -> None:
+    assert _is_loopback(host)
+
+
+@pytest.mark.parametrize(
+    "host", ["bot.example.test", "10.0.0.1", "128.0.0.1", "::2", "localhost.x"]
+)
+def test_non_loopback_hosts(host: str) -> None:
+    assert not _is_loopback(host)
+
+
+def clear_no_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("no_proxy", "NO_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_loopback_target_bypasses_env_proxy(
+    server: LocalServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clear_no_proxy(monkeypatch)
+    dead = f"http://127.0.0.1:{dead_port()}"
+    monkeypatch.setenv("http_proxy", dead)
+    monkeypatch.setenv("https_proxy", dead)
+    assert HttpCompanion(server.url).reply(HISTORY) == "I am here."
+    assert [r.path for r in server.received] == ["/"]
+
+
+def test_env_proxy_is_used_for_other_hosts(
+    server: LocalServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clear_no_proxy(monkeypatch)
+    monkeypatch.setenv("http_proxy", server.url)  # the local server plays the proxy
+    assert HttpCompanion("http://bot.example.test/chat").reply(HISTORY) == "I am here."
+    assert [r.path for r in server.received] == ["http://bot.example.test/chat"]
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda history: {"x": object()},
+        lambda history: {"x": float("nan")},
+        lambda history: 1 / 0,
+    ],
+)
+def test_request_build_failure(server: LocalServer, build: Callable[..., Any]) -> None:
+    with pytest.raises(HttpCompanionError, match="could not build the request") as info:
+        HttpCompanion(server.url, request=build).reply(HISTORY)
+    assert info.value.__cause__ is not None
+    assert server.received == []
+
+
+def test_reader_failure_does_not_echo_response_data(server: LocalServer) -> None:
+    server.answer_json({"text": "ECHOED-REQUEST-DATA"})
+
+    def picky(body: Any) -> str:
+        raise ValueError(f"unexpected body {body}")
+
+    with pytest.raises(HttpCompanionError, match="ValueError") as info:
+        HttpCompanion(server.url, response=picky).reply(HISTORY)
+    assert "ECHOED" not in str(info.value)
+    assert isinstance(info.value.__cause__, ValueError)
+
+
+def test_error_body_is_cut_by_characters(server: LocalServer) -> None:
+    server.status = 500
+    server.body = ("é" * 3000).encode("utf-8")
+    with pytest.raises(HttpCompanionError) as info:
+        HttpCompanion(server.url).reply(HISTORY)
+    assert info.value.body == "é" * 2000
 
 
 def test_bad_timeout_is_rejected() -> None:
@@ -317,8 +431,7 @@ def test_openai_compatible_options(server: LocalServer, monkeypatch: pytest.Monk
         "",
         api_key_env="MOODSONA_TEST_BOT_KEY",
         headers={"X-Bot-Variant": "a"},
-        temperature=0.2,
-        max_tokens=50,
+        extra_body={"temperature": 0.2, "max_completion_tokens": 50},
     )
     companion.reply(HISTORY)
     (got,) = server.received
@@ -326,7 +439,8 @@ def test_openai_compatible_options(server: LocalServer, monkeypatch: pytest.Monk
     assert got.headers["authorization"] == f"Bearer {HIDDEN}"
     assert got.headers["x-bot-variant"] == "a"
     assert got.body["temperature"] == 0.2
-    assert got.body["max_tokens"] == 50
+    assert got.body["max_completion_tokens"] == 50
+    assert "max_tokens" not in got.body
     # An empty system prompt sends no system message.
     assert got.body["messages"][0] == {"role": "user", "content": HISTORY[0].content}
 
@@ -374,7 +488,12 @@ def test_openai_compatible_error_hides_key(
     assert HIDDEN not in str(info.value)
 
 
-@pytest.mark.parametrize("answer", [completion(None), {"choices": []}, {"error": "x"}])
+def test_openai_compatible_null_content_is_empty(server: LocalServer) -> None:
+    server.answer_json(completion(None))
+    assert OpenAICompatibleCompanion(server.url + "/v1", "m", "s").reply(HISTORY) == ""
+
+
+@pytest.mark.parametrize("answer", [completion(42), {"choices": []}, {"error": "x"}])
 def test_openai_compatible_unreadable_reply(server: LocalServer, answer: Any) -> None:
     server.answer_json(answer)
     with pytest.raises(HttpCompanionError, match="reply"):

@@ -15,6 +15,7 @@ standard library.
 from __future__ import annotations
 
 import http.client
+import ipaddress
 import json
 import os
 import urllib.error
@@ -135,30 +136,73 @@ _BODY_LIMIT = 2000
 def messages_request(history: Sequence[ChatMessage]) -> dict[str, Any]:
     """The default request body of :class:`HttpCompanion`.
 
+    Args:
+        history: The messages to send, in order.
+
     Returns:
-        ``{"messages": [{"role": "user", "content": "..."}, ...]}`` with every
-        message of the history in order (roles ``user`` and ``assistant``).
+        ``{"messages": [{"role": "user", "content": "..."}, ...]}`` with one
+        entry per message of the history (roles ``user`` and ``assistant``).
     """
     return {"messages": [{"role": m.role, "content": m.content} for m in history]}
 
 
 def reply_field(body: Any) -> str:
-    """The default response reader of :class:`HttpCompanion`: ``body["reply"]``."""
+    """The default response reader of :class:`HttpCompanion`.
+
+    Args:
+        body: The parsed JSON response body.
+
+    Returns:
+        ``body["reply"]``. :class:`HttpCompanion` checks that it is a string.
+
+    Raises:
+        KeyError: The body has no ``"reply"`` field.
+        TypeError: The body is not a JSON object.
+    """
     reply: str = body["reply"]
     return reply
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    """Refuse redirects: urllib would turn the POST into a GET and resend the headers."""
+def _is_loopback(host: str) -> bool:
+    """True for ``localhost`` and loopback addresses (127.0.0.0/8, ::1)."""
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
-    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
-        return None
+
+def _opener(host: str) -> urllib.request.OpenerDirector:
+    """An opener that speaks only HTTP(S) and follows no redirects.
+
+    Built from explicit handlers, so there is no file:, ftp: or data: handler,
+    and no redirect handler (urllib would turn the POST into a GET and resend
+    the headers): a 3xx becomes an HTTPError. Proxies from the environment are
+    honoured, except for loopback hosts, so local traffic and its headers never
+    go to a proxy.
+    """
+    opener = urllib.request.OpenerDirector()
+    handlers: list[urllib.request.BaseHandler] = [
+        urllib.request.HTTPHandler(),
+        urllib.request.HTTPSHandler(),
+        urllib.request.UnknownHandler(),  # any other scheme: URLError("unknown url type")
+        urllib.request.HTTPDefaultErrorHandler(),
+        urllib.request.HTTPErrorProcessor(),
+    ]
+    if not _is_loopback(host):
+        handlers.append(urllib.request.ProxyHandler())
+    for handler in handlers:
+        opener.add_handler(handler)
+    return opener
 
 
 def _check_url(url: str) -> str:
     """Validate an http(s) URL and return it without query string or fragment."""
     # Checked before parsing: http.client would otherwise reject these later with
     # a message that quotes the path and query string.
+    if not url.isascii():
+        raise ValueError("the URL contains non-ASCII characters; percent-encode them")
     if any(char <= " " or char == "\x7f" for char in url):
         raise ValueError("the URL contains spaces or control characters; percent-encode them")
     parts = urllib.parse.urlsplit(url)
@@ -186,8 +230,10 @@ class HttpCompanion:
     any other shape.
 
     The reply must be a string; an empty string is accepted and recorded as
-    is. Redirects are not followed (a redirect is an error), and proxies from
-    the usual environment variables are honoured.
+    is. Only HTTP(S) is spoken and redirects are not followed (a redirect is
+    an error). Proxies from the usual environment variables are honoured,
+    except for ``localhost`` and loopback addresses, which are always reached
+    directly.
 
     Args:
         url: The endpoint; only ``http://`` and ``https://`` URLs are accepted.
@@ -199,8 +245,8 @@ class HttpCompanion:
 
     Raises:
         ValueError: The URL is not http(s), has no host, an invalid port,
-            credentials, spaces or control characters, or ``timeout`` is not
-            positive.
+            credentials, non-ASCII characters, spaces or control characters,
+            or ``timeout`` is not positive.
     """
 
     def __init__(
@@ -215,8 +261,8 @@ class HttpCompanion:
         self._safe_url = _check_url(url)
         if timeout <= 0:
             raise ValueError("timeout must be positive")
-        self.url = url
-        self.timeout = timeout
+        self._url = url
+        self._timeout = timeout
         self.request = request
         self.response = response
         self._headers = {
@@ -225,20 +271,36 @@ class HttpCompanion:
             "User-Agent": f"moodsona/{__version__}",
             **(headers or {}),
         }
-        self._opener = urllib.request.build_opener(_NoRedirect)
+        self._opener = _opener(urllib.parse.urlsplit(url).hostname or "")
+
+    @property
+    def url(self) -> str:
+        """The endpoint, as given (read-only: it was validated once)."""
+        return self._url
+
+    @property
+    def timeout(self) -> float:
+        """Seconds to wait for the connection and for each read (read-only)."""
+        return self._timeout
 
     def reply(self, history: Sequence[ChatMessage]) -> str:
         """Post the history and return the bot's reply.
 
         Raises:
-            HttpCompanionError: The connection failed or timed out, the status
-                was not 2xx, the body was not JSON, or ``response`` could not
-                read a string reply from it.
+            HttpCompanionError: ``request`` failed or built a body that is not
+                JSON (NaN and infinity are refused), the connection failed or
+                timed out, the status was not 2xx, the body was not JSON, or
+                ``response`` could not read a string reply from it.
         """
-        data = json.dumps(self.request(history), ensure_ascii=False).encode("utf-8")
-        # S310: the scheme was checked in __init__ (http/https only), so urllib's
-        # file:// and ftp:// handlers cannot be reached.
-        req = urllib.request.Request(self.url, data, self._headers, method="POST")  # noqa: S310
+        try:
+            payload = json.dumps(self.request(history), ensure_ascii=False, allow_nan=False)
+        except Exception as exc:  # the builder is the caller's code; any failure is theirs
+            raise self._error(f"could not build the request ({type(exc).__name__})") from exc
+        # S310: the scheme was checked in __init__ (http/https only), and the
+        # opener has no file:, ftp: or data: handler anyway.
+        req = urllib.request.Request(  # noqa: S310
+            self._url, payload.encode("utf-8"), self._headers, method="POST"
+        )
         raw = self._send(req)
         try:
             body = json.loads(raw.decode("utf-8"))
@@ -247,14 +309,16 @@ class HttpCompanion:
         try:
             reply = self.response(body)
         except (LookupError, TypeError, ValueError, AttributeError) as exc:
-            raise self._error(f"could not read the reply from the response ({exc!r})") from exc
+            # Only the type: the exception text may quote the response body.
+            problem = f"could not read the reply from the response ({type(exc).__name__})"
+            raise self._error(problem) from exc
         if not isinstance(reply, str):
             raise self._error(f"the reply must be a string, got {type(reply).__name__}")
         return reply
 
     def _send(self, req: urllib.request.Request) -> bytes:
         try:
-            with self._opener.open(req, timeout=self.timeout) as answer:
+            with self._opener.open(req, timeout=self._timeout) as answer:
                 raw: bytes = answer.read()
                 return raw
         except urllib.error.HTTPError as exc:
@@ -270,17 +334,18 @@ class HttpCompanion:
         except (OSError, http.client.HTTPException) as exc:  # URLError is an OSError
             reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
             if isinstance(reason, TimeoutError):
-                raise self._error(f"timed out after {self.timeout:g} s") from exc
+                raise self._error(f"timed out after {self._timeout:g} s") from exc
             raise self._error(f"request failed: {reason}") from exc
-        except ValueError:
+        except ValueError:  # includes UnicodeEncodeError
             # http.client rejects a bad header name or value with a message that
             # quotes it; drop that message so a key never reaches a log.
-            raise self._error("invalid request headers") from None
+            problem = "invalid request: a header or the URL has characters HTTP does not allow"
+            raise self._error(problem) from None
 
     def _error(
         self, problem: str, *, status: int | None = None, body: bytes | None = None
     ) -> HttpCompanionError:
-        text = None if body is None else body[:_BODY_LIMIT].decode("utf-8", "replace")
+        text = None if body is None else body.decode("utf-8", "replace")[:_BODY_LIMIT]
         return HttpCompanionError(
             f"{self._safe_url}: {problem}", url=self._safe_url, status=status, body=text
         )
@@ -291,9 +356,12 @@ class OpenAICompatibleCompanion(HttpCompanion):
 
     Posts ``{"model": ..., "messages": [system] + history, "stream": false}``
     to ``<base_url>/chat/completions`` and returns
-    ``choices[0].message.content``. Works with local servers such as Ollama
-    (``http://localhost:11434/v1``), LM Studio (``http://localhost:1234/v1``)
-    and vLLM (``http://localhost:8000/v1``), and with hosted ones.
+    ``choices[0].message.content`` (a ``null`` content, as from a refusal or
+    a reasoning model that ran out of tokens, becomes ``""``). Written for
+    local servers such as Ollama (``http://localhost:11434/v1``), LM Studio
+    (``http://localhost:1234/v1``) and vLLM (``http://localhost:8000/v1``);
+    hosted servers that follow the same API work too, but their accepted
+    parameters differ, so sampling options go in ``extra_body``.
 
     Args:
         base_url: The API root, ending in ``/v1`` for most servers; a
@@ -308,8 +376,10 @@ class OpenAICompatibleCompanion(HttpCompanion):
         headers: Extra request headers.
         timeout: Seconds to wait; local models can be slow, hence the
             longer default.
-        temperature: Sent as ``temperature`` when given.
-        max_tokens: Sent as ``max_tokens`` when given.
+        extra_body: Extra fields merged into every request body, for example
+            ``{"temperature": 0.7, "max_tokens": 300}`` (or
+            ``max_completion_tokens`` for servers that want it). They
+            override the fields above, ``stream`` included.
 
     Raises:
         ValueError: The URL is invalid (see :class:`HttpCompanion`), or
@@ -326,13 +396,11 @@ class OpenAICompatibleCompanion(HttpCompanion):
         api_key_env: str | None = None,
         headers: Mapping[str, str] | None = None,
         timeout: float = 120,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
+        extra_body: Mapping[str, Any] | None = None,
     ) -> None:
         self.model = model
         self.system_prompt = system_prompt
-        self.temperature = temperature
-        self.max_tokens = max_tokens
+        self.extra_body = dict(extra_body or {})
         all_headers = dict(headers or {})
         if api_key_env is not None:
             # The value is never echoed: passed by mistake, it may be the key itself.
@@ -354,15 +422,14 @@ class OpenAICompatibleCompanion(HttpCompanion):
 
     def _chat_request(self, history: Sequence[ChatMessage]) -> dict[str, Any]:
         system = [ChatMessage("system", self.system_prompt)] if self.system_prompt else []
-        body: dict[str, Any] = {"model": self.model, **messages_request([*system, *history])}
-        body["stream"] = False
-        if self.temperature is not None:
-            body["temperature"] = self.temperature
-        if self.max_tokens is not None:
-            body["max_tokens"] = self.max_tokens
-        return body
+        return {
+            "model": self.model,
+            **messages_request([*system, *history]),
+            "stream": False,
+            **self.extra_body,
+        }
 
 
 def _first_choice(body: Any) -> str:
-    content: str = body["choices"][0]["message"]["content"]
-    return content
+    content: str | None = body["choices"][0]["message"]["content"]
+    return "" if content is None else content
