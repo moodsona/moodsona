@@ -179,11 +179,12 @@ your setup.
 
 ## Money
 
-With `provider: anthropic` or `openai` every test case calls a paid API, and a
-run of `d` days x `t` turns can make up to `d * (3t + 2)` model calls with
-the default settings (each turn can be retried, plus the end-of-day notes).
+With `provider: anthropic` or `openai` every test case calls a paid API,
+several times per turn when a turn is retried, plus the end-of-day notes.
 The adapter refuses to start such a run unless the provider config sets
-`allow_paid: true`, and the refusal names that maximum. Install the SDK in
+`allow_paid: true`, and the refusal message states the exact maximum number
+of model calls for the configured days and turns
+(`moodsona.bench.max_model_calls`). Install the SDK in
 promptfoo's Python (`moodsona[anthropic]` or `moodsona[openai]`) and set the
 usual API key environment variable in the shell that starts promptfoo.
 
