@@ -85,17 +85,23 @@ The defaults are `moodsona.companion.messages_request` and
 
 Behaviour worth knowing:
 
-- Only `http://` and `https://` URLs are accepted. Put credentials in
-  `headers`, not in the URL.
+- Only `http://` and `https://` URLs are accepted, in ASCII (percent-encode
+  anything else). Put credentials in `headers`, not in the URL.
 - One request per turn, in order, with no retries and no streaming.
 - Redirects are not followed; a redirect is reported as an error.
+- Proxies set in `HTTP_PROXY` / `HTTPS_PROXY` are used, except for
+  `localhost` and loopback addresses (127.x.x.x, `::1`), which are always
+  reached directly.
 - The reply must be a string. An empty string is accepted and recorded as is.
-- Any failure (connection, timeout, a non-2xx status, a body that is not
-  JSON, a reply that cannot be read) raises `moodsona.HttpCompanionError`
-  (a `moodsona.CompanionError`). The message names the URL without its query
-  string and the HTTP status; it never contains your headers. The error's
-  `status` and `body` attributes hold the status code and the start of the
-  response body.
+- Any failure (building the request, connection, timeout, a non-2xx status,
+  a body that is not JSON, a reply that cannot be read) raises
+  `moodsona.HttpCompanionError` (a `moodsona.CompanionError`). The message
+  names the URL without its query string and the HTTP status; it never
+  contains your headers or the response body. The error's `status` and
+  `body` attributes hold the status code and the first 2000 characters of
+  the response body.
+- A failed call stops `run()` with that error, and the turns so far are not
+  returned. Retry inside your own `reply` if your endpoint is flaky.
 
 ## 3. A model behind a chat-completions server: `OpenAICompatibleCompanion`
 
@@ -103,7 +109,9 @@ To test a bot that is a model plus a system prompt, point
 `OpenAICompatibleCompanion` at any server that speaks the chat-completions
 API. It posts `model`, the system prompt followed by the history, and
 `"stream": false` to `<base_url>/chat/completions`, and returns
-`choices[0].message.content`. No extra package is needed.
+`choices[0].message.content`. A `null` content (a refusal, or a reasoning
+model that used up its token budget) is recorded as an empty reply. No extra
+package is needed.
 
 ```python
 from moodsona import FakeProvider, OpenAICompatibleCompanion, load_bundled_persona, run
@@ -112,10 +120,15 @@ bot = OpenAICompatibleCompanion(
     "http://localhost:11434/v1",  # Ollama
     "your-model",  # a model the server has, e.g. from `ollama list`
     "You are a warm, patient companion. Keep replies short.",
-    temperature=0.7,  # optional, like max_tokens
+    extra_body={"temperature": 0.7, "max_tokens": 300},  # optional
 )
 transcript = run(load_bundled_persona("anxious-newcomer"), FakeProvider(), bot, 2, 3)
 ```
+
+`extra_body` is merged into every request as is, so you choose the parameter
+names your server accepts. Local servers take `max_tokens`; some hosted
+reasoning models reject it and want `max_completion_tokens` instead, and may
+reject `temperature`.
 
 Usual base URLs of local servers (check your server's own docs if you changed
 its port):
