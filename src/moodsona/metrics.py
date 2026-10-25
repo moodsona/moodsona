@@ -126,6 +126,21 @@ class TranscriptMetrics:
         return data
 
 
+def format_number(value: float | None, spec: str = ".1f") -> str:
+    """Format a metric for a table; None becomes ``"n/a"``.
+
+    Args:
+        value: The metric.
+        spec: A format spec, e.g. ``".1f"`` or ``"+.2f"``.
+    """
+    return "n/a" if value is None else format(value, spec)
+
+
+def format_share(value: float | None) -> str:
+    """Format a share as a whole percentage (``0.25`` -> ``"25%"``); None becomes ``"n/a"``."""
+    return format_number(value, ".0%")
+
+
 def _mean(values: Sequence[float]) -> float | None:
     return fmean(values) if values else None
 

@@ -15,3 +15,6 @@ htmlcov/
 # Scratch directory used by the Claude review workflow.
 .review/
 .env
+
+# Default output of `moodsona bench`
+bench-results/

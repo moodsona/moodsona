@@ -337,7 +337,10 @@ cannot.
 - **The result depends on the user model.** Different models play the same
   persona differently, and some drift out of character after many turns. Fix
   the user model and `rng_seed` when you compare bots. (Which models hold a
-  persona longest is a planned v0.2 leaderboard.)
+  persona longest is a planned v0.2 leaderboard; `moodsona bench` is its
+  scaffold. It runs the bundled personas with one user model against a fixed
+  scripted companion and tabulates the metrics above per model, without a
+  single score yet.)
 - **English only.** v0.1 supports `language: en`. Other languages need their
   own language profile and native-speaker-written personas, planned for v1.0.
 - **No crisis content.** Personas do not portray suicidal ideation, self-harm,
