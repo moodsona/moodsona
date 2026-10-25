@@ -79,9 +79,10 @@ method (the `moodsona.Companion` protocol; `history` is a sequence of
 importable by the Python that promptfoo runs: install your package in that
 environment or put its folder on `PYTHONPATH`.
 
-An unknown key is an error, so a typo does not silently run the default.
-promptfoo's own keys (`pythonExecutable` and other camelCase keys, `workers`,
-`timeout`) are left to promptfoo. A multi-day run with a real model can take
+An unknown key is an error, so a typo does not silently run the default; so
+is a key that differs from one of these only in case or underscores
+(`turnsPerDay`). promptfoo's own keys (`pythonExecutable`, `basePath` and other
+camelCase keys, `workers`, `timeout`) are left to promptfoo. A multi-day run with a real model can take
 longer than promptfoo's default timeout of 5 minutes; raise `timeout`
 (milliseconds) if it does.
 
@@ -117,8 +118,10 @@ a prompt such as `"moodsona: {{persona}}"` just labels the results table.
 
 Problems come back as promptfoo's `{"error": "..."}` instead of an exception:
 a bad setting, an unknown persona, a companion that cannot be imported or
-built, a missing SDK, or an exception raised during the run (your companion's
-included, with its type and message).
+built (the error names the `companion_args` keys, never their values), a
+provider that cannot be created (e.g. a missing SDK or API key), or an
+exception raised during the run (your companion's included, with its type and
+message).
 
 ## Assertions
 

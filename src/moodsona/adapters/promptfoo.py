@@ -43,9 +43,8 @@ from typing import Any
 
 from moodsona import bench
 from moodsona.companion import Companion
-from moodsona.llm.base import LLMError
 from moodsona.metrics import compute_metrics
-from moodsona.personas import load_bundled_persona, load_persona
+from moodsona.personas import PersonaError, load_bundled_persona, load_persona
 from moodsona.runner import Transcript, run
 from moodsona.state import PersonaSeed
 from moodsona.validation import YAML_SUFFIXES
@@ -103,8 +102,9 @@ def call_api(
         prompt: The rendered promptfoo prompt. Not used: the persona writes the
             user's lines.
         options: promptfoo's provider options; ``options["config"]`` holds the
-            settings (see :data:`DEFAULTS`), and ``options["basePath"]`` (the
-            folder of the promptfoo config) anchors a relative persona path.
+            settings (see :data:`DEFAULTS`) and the ``basePath`` promptfoo adds
+            (the folder of the promptfoo config), which anchors a relative
+            persona path.
         context: promptfoo's call context; ``context["vars"]`` may override the
             keys in :data:`RUN_KEYS`.
 
@@ -119,23 +119,29 @@ def call_api(
         allowed, or the run fails.
     """
     del prompt  # documented as unused
+    config = options.get("config")
     try:
-        settings = _settings(options.get("config"), (context or {}).get("vars"))
-        persona = _persona(settings.persona, options.get("basePath"))
-        companion = _companion(settings.companion, settings.companion_args)
+        settings = _settings(config, (context or {}).get("vars"))
         if settings.provider != "fake" and not settings.allow_paid:
-            return {"error": _paid_refusal(settings)}
+            return {"error": _paid_refusal(settings)}  # before any user code or provider
+        base_path = config.get("basePath") if isinstance(config, Mapping) else None
+        persona = _persona(settings.persona, base_path)
+        companion = _companion(settings.companion, settings.companion_args)
+    except (_ConfigError, PersonaError, FileNotFoundError) as exc:
+        return {"error": f"moodsona: {exc}"}
+    # Provider SDKs and the companion (user code) can raise anything: report it, do not crash.
+    try:
         provider = bench.make_provider(settings.provider, settings.model)
-    except KeyError as exc:  # an unknown bundled persona id; args[0] lists the known ones
-        return {"error": f"moodsona: {exc.args[0]}"}
-    except (_ConfigError, ValueError, LLMError, FileNotFoundError) as exc:
-        return {"error": f"moodsona: {exc}"}  # ValueError includes PersonaError
+    except Exception as exc:
+        return {
+            "error": f"moodsona: cannot create provider {settings.provider!r}: {_describe(exc)}"
+        }
     try:
         transcript = run(
             persona, provider, companion, settings.days, settings.turns_per_day, settings.seed
         )
-    except Exception as exc:  # the companion is user code: report, do not crash
-        return {"error": f"moodsona: the run failed: {type(exc).__name__}: {exc}"}
+    except Exception as exc:
+        return {"error": f"moodsona: the run failed: {_describe(exc)}"}
     output = {
         "persona": persona.id,
         "companion": settings.companion,
@@ -147,6 +153,10 @@ def call_api(
         "metrics": compute_metrics(transcript, language=persona.language).to_dict(),
     }
     return {"output": output}
+
+
+def _describe(exc: BaseException) -> str:
+    return f"{type(exc).__name__}: {exc}"
 
 
 def _record(transcript: Transcript) -> dict[str, Any]:
@@ -179,7 +189,12 @@ def _settings(config: object, test_vars: object) -> _Settings:
     if not isinstance(test_vars, Mapping):
         raise _ConfigError("the test vars must be a mapping")
     for key in config:
-        if key not in DEFAULTS and not _is_promptfoo_key(key):
+        if key in DEFAULTS:
+            continue
+        meant = _MOODSONA_KEYS_FOLDED.get(_fold(key))
+        if meant is not None:
+            raise _ConfigError(f"unknown config key {key!r}; did you mean {meant!r}?")
+        if not _is_promptfoo_key(key):
             raise _ConfigError(f"unknown config key {key!r}; moodsona keys: {', '.join(DEFAULTS)}")
     for key in test_vars:
         if key in DEFAULTS and key not in RUN_KEYS:
@@ -212,6 +227,14 @@ def _settings(config: object, test_vars: object) -> _Settings:
     )
 
 
+def _fold(key: object) -> str:
+    """``key`` without case and underscores: ``turnsPerDay`` and ``turns_per_day`` match."""
+    return str(key).replace("_", "").lower()
+
+
+_MOODSONA_KEYS_FOLDED = {_fold(key): key for key in DEFAULTS}
+
+
 def _is_promptfoo_key(key: object) -> bool:
     return isinstance(key, str) and (key in _PROMPTFOO_KEYS or key != key.lower())
 
@@ -238,18 +261,23 @@ def _integer(key: str, value: object, *, minimum: int | None = None) -> int:
 def _persona(value: str, base_path: object) -> PersonaSeed:
     """Load a persona file, or a bundled persona when ``value`` is a bare id and no such file.
 
-    A relative path is read from ``base_path`` (promptfoo's config folder) when given.
+    The rule is the one ``moodsona smoke`` uses. A relative path is read from
+    ``base_path`` (promptfoo's config folder) when given.
 
     Raises:
         PersonaError: The file is missing or invalid.
-        KeyError: ``value`` is a bare name, but no bundled persona has that id.
+        _ConfigError: ``value`` is a bare name, but no bundled persona has that id.
+        FileNotFoundError: The bundled personas are missing (a broken install).
     """
     path = Path(value)
     if not path.is_absolute() and isinstance(base_path, str) and base_path:
         path = Path(base_path) / path
     if path.is_file() or Path(value).name != value or path.suffix in YAML_SUFFIXES:
         return load_persona(path)
-    return load_bundled_persona(value)
+    try:
+        return load_bundled_persona(value)
+    except KeyError as exc:  # its message lists the bundled ids
+        raise _ConfigError(str(exc.args[0]) if exc.args else str(exc)) from exc
 
 
 def _companion(spec: str, args: Mapping[str, Any]) -> Companion:
@@ -274,9 +302,10 @@ def _companion(spec: str, args: Mapping[str, Any]) -> Companion:
     try:
         companion = target(**args)
     except Exception as exc:
-        problem = f"{type(exc).__name__}: {exc}"
+        # Only the argument names: their values may be secrets, and promptfoo stores errors.
+        names = ", ".join(args) or "none"
         raise _ConfigError(
-            f"companion {spec!r} with companion_args {dict(args)}: {problem}"
+            f"companion {spec!r} with companion_args ({names}): {_describe(exc)}"
         ) from exc
     if not isinstance(companion, Companion) or not callable(companion.reply):
         made = type(companion).__name__
