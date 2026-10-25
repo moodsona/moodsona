@@ -157,6 +157,10 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def _check_url(url: str) -> str:
     """Validate an http(s) URL and return it without query string or fragment."""
+    # Checked before parsing: http.client would otherwise reject these later with
+    # a message that quotes the path and query string.
+    if any(char <= " " or char == "\x7f" for char in url):
+        raise ValueError("the URL contains spaces or control characters; percent-encode them")
     parts = urllib.parse.urlsplit(url)
     if parts.scheme.lower() not in ("http", "https"):
         raise ValueError(f"the URL must start with http:// or https:// (got {parts.scheme!r})")
@@ -164,6 +168,10 @@ def _check_url(url: str) -> str:
         raise ValueError("the URL has no host")
     if parts.username is not None or parts.password is not None:
         raise ValueError("credentials in the URL are not supported; send them with headers=")
+    try:
+        parts.port  # noqa: B018 - raises ValueError for a port that is not a number
+    except ValueError:
+        raise ValueError("the URL has an invalid port") from None
     return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
 
 
@@ -190,8 +198,9 @@ class HttpCompanion:
         response: Returns the reply text from the parsed JSON body.
 
     Raises:
-        ValueError: The URL is not http(s), has no host or holds credentials,
-            or ``timeout`` is not positive.
+        ValueError: The URL is not http(s), has no host, an invalid port,
+            credentials, spaces or control characters, or ``timeout`` is not
+            positive.
     """
 
     def __init__(
@@ -250,10 +259,14 @@ class HttpCompanion:
                 return raw
         except urllib.error.HTTPError as exc:
             hint = " (redirects are not followed)" if 300 <= exc.code < 400 else ""
-            with exc:
-                raw = exc.read()
             problem = f"HTTP {exc.code} {exc.reason}{hint}"
-            raise self._error(problem, status=exc.code, body=raw) from None
+            error_body: bytes | None
+            try:
+                with exc:
+                    error_body = exc.read()
+            except (OSError, http.client.HTTPException):  # the body is only a diagnostic
+                error_body = None
+            raise self._error(problem, status=exc.code, body=error_body) from None
         except (OSError, http.client.HTTPException) as exc:  # URLError is an OSError
             reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
             if isinstance(reason, TimeoutError):
@@ -284,7 +297,7 @@ class OpenAICompatibleCompanion(HttpCompanion):
 
     Args:
         base_url: The API root, ending in ``/v1`` for most servers; a
-            trailing slash is fine.
+            trailing slash is fine, and a query string is kept.
         model: The model name the server knows.
         system_prompt: Your bot's system prompt; an empty string sends none.
         api_key_env: Name of an environment variable that holds the API key.
@@ -299,8 +312,9 @@ class OpenAICompatibleCompanion(HttpCompanion):
         max_tokens: Sent as ``max_tokens`` when given.
 
     Raises:
-        ValueError: The URL is not http(s), or ``api_key_env`` names a
-            variable that is unset or empty.
+        ValueError: The URL is invalid (see :class:`HttpCompanion`), or
+            ``api_key_env`` is not a variable name or names a variable that
+            is unset or empty. The message never repeats ``api_key_env``.
     """
 
     def __init__(
@@ -308,8 +322,8 @@ class OpenAICompatibleCompanion(HttpCompanion):
         base_url: str,
         model: str,
         system_prompt: str,
-        api_key_env: str | None = None,
         *,
+        api_key_env: str | None = None,
         headers: Mapping[str, str] | None = None,
         timeout: float = 120,
         temperature: float | None = None,
@@ -321,12 +335,17 @@ class OpenAICompatibleCompanion(HttpCompanion):
         self.max_tokens = max_tokens
         all_headers = dict(headers or {})
         if api_key_env is not None:
+            # The value is never echoed: passed by mistake, it may be the key itself.
+            if not api_key_env.isidentifier():
+                raise ValueError("api_key_env must be the name of an environment variable")
             key = os.environ.get(api_key_env, "").strip()
             if not key:
-                raise ValueError(f"api_key_env is {api_key_env!r}, but that variable is not set")
+                raise ValueError("the environment variable named by api_key_env is not set")
             all_headers["Authorization"] = f"Bearer {key}"
+        parts = urllib.parse.urlsplit(base_url)
+        url = parts._replace(path=parts.path.rstrip("/") + "/chat/completions").geturl()
         super().__init__(
-            base_url.rstrip("/") + "/chat/completions",
+            url,
             headers=all_headers,
             timeout=timeout,
             request=self._chat_request,

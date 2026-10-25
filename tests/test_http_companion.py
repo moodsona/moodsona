@@ -48,6 +48,8 @@ class LocalServer:
     body: bytes = b'{"reply": "I am here."}'
     extra_headers: dict[str, str] = field(default_factory=dict)
     delay: float = 0.0
+    # Announce more body bytes than are sent, so the client's read fails.
+    short_body: bool = False
     received: list[Received] = field(default_factory=list)
 
     def answer_json(self, data: Any) -> None:
@@ -68,7 +70,8 @@ def server(monkeypatch: pytest.MonkeyPatch) -> Iterator[LocalServer]:
             time.sleep(state.delay)
             self.send_response(state.status)
             self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(state.body)))
+            length = len(state.body) + (100 if state.short_body else 0)
+            self.send_header("Content-Length", str(length))
             for name, value in state.extra_headers.items():
                 self.send_header(name, value)
             self.end_headers()
@@ -172,6 +175,27 @@ def test_invalid_header_value_is_not_quoted(server: LocalServer) -> None:
     assert info.value.__cause__ is None
     assert info.value.__suppress_context__
     assert server.received == []
+
+
+@pytest.mark.parametrize("status", [200, 500])
+def test_truncated_body(server: LocalServer, status: int) -> None:
+    server.status = status
+    server.short_body = True
+    with pytest.raises(HttpCompanionError) as info:
+        HttpCompanion(server.url).reply(HISTORY)
+    assert info.value.status == (None if status == 200 else 500)
+
+
+@pytest.mark.parametrize("url", ["http://127.0.0.1/chat?token=a b", "http://127.0.0.1/a\rb"])
+def test_url_with_spaces_or_control_characters_is_rejected(url: str) -> None:
+    with pytest.raises(ValueError, match="URL") as info:
+        HttpCompanion(url)
+    assert "token" not in str(info.value)
+
+
+def test_bad_port_is_rejected() -> None:
+    with pytest.raises(ValueError, match="port"):
+        HttpCompanion("http://127.0.0.1:http/chat")
 
 
 def test_redirects_are_not_followed(server: LocalServer) -> None:
@@ -313,10 +337,27 @@ def test_openai_compatible_missing_key(monkeypatch: pytest.MonkeyPatch, value: s
         monkeypatch.delenv("MOODSONA_TEST_BOT_KEY", raising=False)
     else:
         monkeypatch.setenv("MOODSONA_TEST_BOT_KEY", value)
-    with pytest.raises(ValueError, match="MOODSONA_TEST_BOT_KEY"):
+    with pytest.raises(ValueError, match="api_key_env is not set"):
         OpenAICompatibleCompanion(
             "http://127.0.0.1/v1", "m", "s", api_key_env="MOODSONA_TEST_BOT_KEY"
         )
+
+
+def test_openai_compatible_key_env_is_keyword_only() -> None:
+    with pytest.raises(TypeError):
+        OpenAICompatibleCompanion("http://127.0.0.1/v1", "m", "s", HIDDEN)  # type: ignore[call-arg]
+
+
+def test_openai_compatible_key_passed_as_env_name_is_not_echoed() -> None:
+    with pytest.raises(ValueError, match="name of an environment variable") as info:
+        OpenAICompatibleCompanion("http://127.0.0.1/v1", "m", "s", api_key_env=HIDDEN)
+    assert HIDDEN not in str(info.value)
+
+
+def test_openai_compatible_keeps_query_string(server: LocalServer) -> None:
+    server.answer_json(completion("ok"))
+    OpenAICompatibleCompanion(server.url + "/v1/?api-version=2", "m", "s").reply(HISTORY)
+    assert server.received[0].path == "/v1/chat/completions?api-version=2"
 
 
 def test_openai_compatible_error_hides_key(
