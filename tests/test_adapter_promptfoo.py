@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import operator
-import re
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -322,92 +321,46 @@ def test_a_companion_that_fails_to_construct_is_an_error(monkeypatch: pytest.Mon
 
 # ------------------------------------------------------------- the example ----
 
-_ASSERTION = re.compile(r"^output((?:\.\w+)+) (===|!==|<=|>=) (\S+)$")
+
+def _rate_at_most(name: str, limit: float) -> Callable[[dict[str, Any]], bool]:
+    """``output.metrics.<name> !== null && output.metrics.<name> <= limit``."""
+    return lambda o: o["metrics"][name] is not None and o["metrics"][name] <= limit
 
 
-def _evaluate(expression: str, output: Any) -> bool:
-    """Evaluate the small subset of JavaScript the example's assertions use.
-
-    Clauses joined by ``&&`` are checked in order and stop at the first false
-    one, as in JavaScript. Where Python and JavaScript would disagree (an
-    ordering comparison with null, a boolean against a number, a missing
-    field), this fails instead of guessing.
-    """
-    for clause in expression.split(" && "):
-        match = _ASSERTION.match(clause.strip())
-        assert match, f"the example assertion {expression!r} is outside the checked subset"
-        path, symbol, literal = match.groups()
-        value = output
-        for name in path.strip(".").split("."):
-            if name == "length":
-                assert isinstance(value, list), f"{path}: .length of a non-list"
-                value = len(value)
-            else:
-                assert isinstance(value, dict), f"{path}: field {name!r} of a non-object"
-                assert name in value, f"{path}: no field {name!r} (undefined in JavaScript)"
-                value = value[name]
-        expected = json.loads(literal)
-        if symbol in {"<=", ">="}:
-            assert _is_number(value), f"{path} is {value!r}; JavaScript would coerce it"
-            assert _is_number(expected), f"{clause}: compare with a number"
-        else:
-            assert isinstance(value, bool) == isinstance(expected, bool), (
-                f"{clause}: a boolean and a number are never === in JavaScript"
-            )
-        compare = {"===": operator.eq, "!==": operator.ne, "<=": operator.le, ">=": operator.ge}
-        if not compare[symbol](value, expected):
-            return False
-    return True
-
-
-def _is_number(value: Any) -> bool:
-    return isinstance(value, int | float) and not isinstance(value, bool)
-
-
-@pytest.mark.parametrize(
-    "expression",
-    [
-        "output.metrics.x <= 0.2",  # null <= 0.2 is true in JavaScript, an error in Python
-        "output.metrics.flag === 1",  # true === 1 is false in JavaScript, True == 1 in Python
-        "output.metrics.missing === 0",
-        "output.metrics.x.length === 0",
-        "output.metrics.x || output.metrics.y",
-    ],
-)
-def test_the_evaluator_refuses_where_python_and_javascript_differ(expression: str) -> None:
-    with pytest.raises(AssertionError):
-        _evaluate(expression, {"metrics": {"x": None, "flag": True}})
-
-
-def test_the_evaluator_short_circuits_like_javascript() -> None:
-    output = {"metrics": {"x": None, "y": 0.1}}
-    assert not _evaluate("output.metrics.x !== null && output.metrics.x <= 0.2", output)
-    assert _evaluate("output.metrics.y !== null && output.metrics.y <= 0.2", output)
-    assert _evaluate("output.metrics.x === null", output)
+#: Each JavaScript assertion of the example config, as the same check in Python.
+EXAMPLE_ASSERTIONS: dict[str, Callable[[dict[str, Any]], bool]] = {
+    "output.metrics.polluted_share === 0": lambda o: o["metrics"]["polluted_share"] == 0,
+    "output.metrics.forced_share !== null && output.metrics.forced_share <= 0.2": _rate_at_most(
+        "forced_share", 0.2
+    ),
+    "output.metrics.own_repeat_rate !== null && output.metrics.own_repeat_rate <= 0.2": (
+        _rate_at_most("own_repeat_rate", 0.2)
+    ),
+    "output.metrics.turns === 6": lambda o: o["metrics"]["turns"] == 6,
+    "output.transcript.length === 12": lambda o: len(o["transcript"]) == 12,
+    "output.metrics.days_skipped <= 1": lambda o: o["metrics"]["days_skipped"] <= 1,
+    "output.metrics.active_days >= 2": lambda o: o["metrics"]["active_days"] >= 2,
+}
 
 
 def test_the_example_config_runs_and_its_assertions_hold() -> None:
     config = yaml.safe_load((EXAMPLE_DIR / "promptfooconfig.yaml").read_text(encoding="utf-8"))
+    assert config["evaluateOptions"]["cache"] is False  # see the comment in the file
     (provider,) = config["providers"]
     assert provider["id"] == "file://provider.py"
     assert provider["config"]["provider"] == "fake"
     prompt = config["prompts"][0]
     default_asserts = config.get("defaultTest", {}).get("assert", [])
     assert config["tests"]
+    all_asserts = default_asserts + [a for test in config["tests"] for a in test.get("assert", [])]
+    assert {a["type"] for a in all_asserts} == {"javascript"}
+    assert sorted(a["value"] for a in all_asserts) == sorted(EXAMPLE_ASSERTIONS)
     for test in config["tests"]:
         test_vars = test.get("vars", {})
         result = _call(provider["config"], test_vars, prompt=prompt, base_path=str(EXAMPLE_DIR))
         assert "output" in result, result
-        asserts = default_asserts + test.get("assert", [])
-        assert asserts
-        for check in asserts:
-            assert check["type"] == "javascript"
-            assert _evaluate(check["value"], result["output"]), (test_vars, check["value"])
-
-
-def test_the_example_disables_promptfoo_caching() -> None:
-    config = yaml.safe_load((EXAMPLE_DIR / "promptfooconfig.yaml").read_text(encoding="utf-8"))
-    assert config["evaluateOptions"]["cache"] is False
+        for check in default_asserts + test.get("assert", []):
+            assert EXAMPLE_ASSERTIONS[check["value"]](result["output"]), (test_vars, check)
 
 
 def test_the_sdist_ships_the_example_the_tests_read() -> None:
