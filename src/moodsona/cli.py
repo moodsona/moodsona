@@ -206,6 +206,11 @@ def _write_trajectory(out: TextIO, transcript: Transcript) -> None:
         )
 
 
+def _write_summary(out: TextIO, m: TranscriptMetrics) -> None:
+    """Write the compact metrics table of a run (see :func:`_summary_lines`)."""
+    out.write("\n".join(_summary_lines(m)) + "\n")
+
+
 def _smoke(args: argparse.Namespace) -> int:
     seed = _load_cli_persona(args.persona)
     if seed is None:
@@ -296,17 +301,18 @@ def _save(transcript: Transcript, path: Path) -> str | None:
     so an existing file (``--force``) stays as it was until the new one is
     complete. When the replace fails, the temporary file is kept and named.
     """
-    temp: Path | None = None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
             dir=path.parent, prefix=f"{path.name}.", suffix=".tmp", delete=False
         ) as file:
             temp = Path(file.name)
+    except OSError as exc:
+        return f"cannot write the transcript to {path}: {exc}"
+    try:
         transcript.to_jsonl(temp)
     except OSError as exc:
-        if temp is not None:
-            temp.unlink(missing_ok=True)
+        temp.unlink(missing_ok=True)
         return f"cannot write the transcript to {path}: {exc}"
     try:
         os.replace(temp, path)
@@ -352,8 +358,7 @@ def _run(args: argparse.Namespace) -> int:
     )
     _write_trajectory(out, transcript)
     out.write(f"wrote {target}\n")
-    lines = _summary_lines(compute_metrics(transcript, language=seed.language))
-    out.write("\n".join(lines) + "\n")
+    _write_summary(out, compute_metrics(transcript, language=seed.language))
     return 0
 
 
@@ -399,7 +404,7 @@ def _report(args: argparse.Namespace) -> int:
     if args.json:
         sys.stdout.write(json.dumps(m.to_dict(), indent=2) + "\n")
         return 0
-    sys.stdout.write("\n".join(_summary_lines(m)) + "\n")
+    _write_summary(sys.stdout, m)
     return 0
 
 

@@ -9,16 +9,10 @@ from moodsona.cli import main
 from moodsona.llm.fake import FakeProvider
 from moodsona.metrics import compute_metrics
 from moodsona.runner import Transcript
+from support import forbid_make_provider
 
 REPO = Path(__file__).resolve().parents[1]
 EXAMPLE = REPO / "personas" / "examples" / "anxious-newcomer.yaml"
-
-
-def _forbid_make_provider(monkeypatch: pytest.MonkeyPatch) -> None:
-    def forbidden(name: str, model: str | None) -> FakeProvider:
-        raise AssertionError("no provider may be created")
-
-    monkeypatch.setattr(bench, "make_provider", forbidden)
 
 
 def _run(*args: str) -> list[str]:
@@ -104,7 +98,7 @@ def test_unknown_companion_specs_are_usage_errors(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _forbid_make_provider(monkeypatch)
+    forbid_make_provider(monkeypatch)
     out = tmp_path / "run.jsonl"
     assert main(_run(str(EXAMPLE), "--companion", spec, "--out", str(out))) == 2
     err = capsys.readouterr().err
@@ -116,7 +110,7 @@ def test_unknown_companion_specs_are_usage_errors(
 def test_a_missing_or_empty_script_is_a_usage_error_before_any_model_call(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _forbid_make_provider(monkeypatch)
+    forbid_make_provider(monkeypatch)
     out = tmp_path / "run.jsonl"
     missing = tmp_path / "missing.txt"
     assert main(_run(str(EXAMPLE), "--companion", f"script:{missing}", "--out", str(out))) == 2
@@ -135,7 +129,7 @@ def test_a_missing_or_empty_script_is_a_usage_error_before_any_model_call(
 def test_run_fails_cleanly_on_a_bad_persona(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _forbid_make_provider(monkeypatch)
+    forbid_make_provider(monkeypatch)
     monkeypatch.chdir(tmp_path)
     assert main(_run("no-such-persona")) == 1
     err = capsys.readouterr().err
@@ -159,7 +153,7 @@ def test_days_and_turns_must_be_positive(value: str) -> None:
 def test_out_must_not_be_a_directory(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _forbid_make_provider(monkeypatch)
+    forbid_make_provider(monkeypatch)
     assert main(_run(str(EXAMPLE), "--out", str(tmp_path))) == 2
     assert "is a directory" in capsys.readouterr().err
 
@@ -167,7 +161,7 @@ def test_out_must_not_be_a_directory(
 def test_an_unwritable_out_is_a_usage_error_before_any_model_call(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _forbid_make_provider(monkeypatch)
+    forbid_make_provider(monkeypatch)
     blocker = tmp_path / "file"
     blocker.write_text("not a folder", encoding="utf-8")
     assert main(_run(str(EXAMPLE), "--out", str(blocker / "run.jsonl"))) == 2
@@ -180,7 +174,7 @@ def test_an_existing_out_is_kept_unless_forced(
     out = tmp_path / "run.jsonl"
     out.write_text("an earlier (maybe paid) run\n", encoding="utf-8")
     short = ["--turns", "1", "--days", "1", "--out", str(out)]
-    _forbid_make_provider(monkeypatch)
+    forbid_make_provider(monkeypatch)
     assert main(_run(str(EXAMPLE), *short)) == 2  # a fake run too
     assert "already exists" in capsys.readouterr().err
     assert out.read_text(encoding="utf-8") == "an earlier (maybe paid) run\n"
@@ -192,7 +186,7 @@ def test_an_existing_out_is_kept_unless_forced(
 def test_out_never_replaces_the_input_files(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _forbid_make_provider(monkeypatch)
+    forbid_make_provider(monkeypatch)
     persona = tmp_path / "anxious-newcomer.yaml"
     persona.write_bytes(EXAMPLE.read_bytes())
     script = tmp_path / "replies.txt"
@@ -206,7 +200,7 @@ def test_out_never_replaces_the_input_files(
 def test_a_dangling_symlink_counts_as_an_existing_out(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _forbid_make_provider(monkeypatch)
+    forbid_make_provider(monkeypatch)
     out = tmp_path / "run.jsonl"
     try:
         out.symlink_to(tmp_path / "gone.jsonl")
@@ -299,7 +293,7 @@ def test_a_failed_forced_run_keeps_the_old_out(
 def test_model_without_a_real_provider_is_a_usage_error(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _forbid_make_provider(monkeypatch)
+    forbid_make_provider(monkeypatch)
     out = tmp_path / "run.jsonl"
     assert main(_run(str(EXAMPLE), "--model", "some-model", "--yes", "--out", str(out))) == 2
     assert "--model needs --provider" in capsys.readouterr().err
@@ -313,7 +307,7 @@ def test_paid_providers_need_yes_and_never_start_without_it(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _forbid_make_provider(monkeypatch)
+    forbid_make_provider(monkeypatch)
     out = tmp_path / "new" / "run.jsonl"
     assert main(_run(str(EXAMPLE), "--provider", provider, "--out", str(out))) == 2
     err = capsys.readouterr().err
@@ -327,7 +321,7 @@ def test_paid_providers_need_yes_and_never_start_without_it(
 def test_run_and_bench_share_the_cost_message(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _forbid_make_provider(monkeypatch)
+    forbid_make_provider(monkeypatch)
     common = ["--provider", "openai", "--days", "2", "--turns", "1"]
     assert main(_run("anxious-newcomer", *common, "--out", str(tmp_path / "r.jsonl"))) == 2
     from_run = capsys.readouterr().err
@@ -338,7 +332,7 @@ def test_run_and_bench_share_the_cost_message(
 def test_a_paid_run_does_not_overwrite_an_existing_out(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _forbid_make_provider(monkeypatch)
+    forbid_make_provider(monkeypatch)
     out = tmp_path / "run.jsonl"
     out.write_text("an earlier run\n", encoding="utf-8")
     assert main(_run(str(EXAMPLE), "--provider", "anthropic", "--yes", "--out", str(out))) == 2
