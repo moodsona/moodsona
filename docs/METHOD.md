@@ -213,6 +213,104 @@ incompatible with ours, we did not download the data at all.
 If you are an author of one of these works and think the description of your
 idea is wrong, please open an issue.
 
+## Fidelity check (experimental)
+
+`moodsona.fidelity.classifier_two_sample_test(reference, simulated)` asks one
+question: can a simple classifier tell your simulated users from real ones?
+It is a first cut; the API and the features may change.
+
+You bring the reference set: real conversations you hold and are allowed to
+use. moodsona ships none. Both sets are lists of conversations in the
+`Transcript.visible_history()` format (`user` is the person, `assistant` the
+companion).
+
+**Say who is speaking.** Conversations by the same person are not
+independent: a person's style shows in all of them. The same goes for one
+persona run with several seeds. Pass one group id per conversation,
+`reference_groups` (for example a pseudonymous user id) and
+`simulated_groups` (for example the persona id). Without them every
+conversation counts as its own group. The classifier then meets the same
+speakers in training and in testing, learns their style rather than the
+difference between the sets, and the p-value comes out far too small. In a
+test with three speakers per set and five conversations each, all drawn from
+one population (run with `folds=3`), grouping by conversation gave the
+smallest possible p-value every time; grouping by speaker did not. Each set
+needs at least `folds` groups.
+
+**Use the same companion.** `overlap_with_companion` measures how many words
+a message shares with the companion's previous message, so it depends on the
+companion as much as on the user. Compare sets collected with the same or a
+comparable companion, or leave the feature out with
+`features=[name for name in FEATURE_NAMES if name != "overlap_with_companion"]`.
+
+What it does:
+
+1. **Features.** Every user message becomes eight numbers: length (`log1p`
+   of the characters), share of punctuation, number of question marks,
+   whether the first letter is lower case, whether there is an emoji (a code
+   point range heuristic), type/token ratio, share of first-person singular
+   words (`i`, `me`, `my`, `i'm` ...; English only), and word overlap
+   (Jaccard) with the companion's previous message. The docstring of
+   `message_features` lists the exact definitions.
+2. **Classifier.** A logistic regression with L2 regularisation, fitted by
+   plain gradient descent in pure Python (a fixed 200 steps, not run to
+   convergence), on features standardised with the training data only. Each
+   set gets equal weight in training.
+3. **Grouped k-fold.** All messages of one group go to the same fold (5 by
+   default), so the classifier is never tested on a speaker it saw in
+   training. Every fold holds groups from both sets.
+4. **Balanced accuracy.** The score is the recall on the held-out messages
+   of each set, averaged over the two sets. It counts messages, not
+   conversations, so long conversations weigh more. With sets of different
+   sizes, plain accuracy rewards always guessing the bigger set; balanced
+   accuracy puts that at 0.5.
+5. **Permutation p-value.** The set labels are shuffled between groups (each
+   set keeps its number of groups) and the whole cross-validation runs again,
+   100 times by default. The p-value is the share of shuffles, counting the
+   real labels as one, that score at least as high as the real labels. It
+   cannot go below `1 / (1 + n_permutations)`, about 0.01 by default.
+
+Everything is seeded, so the same inputs and `seed` give the same result on
+the same Python version (float sums changed in Python 3.12, so the last
+digits can differ between versions).
+The folds depend on the seed and on which set is passed first, so swapping
+the sets acts like changing the seed. A borderline result can move with
+either; rerun it with a few seeds before reading much into it. About 1,600
+messages take about two minutes with the defaults.
+
+How to read it:
+
+- **Accuracy near 0.5, large p-value**: no evidence of a difference *on
+  these eight features*. That is not evidence that the sets are alike: with
+  a small reference set the test has little power and misses real
+  differences.
+- **High accuracy, small p-value**: the sets differ in a way these features
+  detect.
+- **High accuracy, large p-value**: too little data to tell; a few lucky
+  folds can score high by chance.
+- **Accuracy clearly below 0.5**: noise (common with few groups, where each
+  held-out fold can be unlike the folds the classifier trained on) or a
+  problem with the data. It does not mean "more real than real".
+
+`result.weights` is a rough hint at what gives the simulator away, not a
+ranking. Each weight belongs to a standardised feature, and a positive weight
+means "more typical of the simulated set". The fit is not converged, and
+correlated features (length and type/token ratio, for example) share weight
+in ways that change with the number of steps, so the order of similar
+weights means little.
+
+How much data: a rough guide, not a power analysis. With fewer than about 20
+speakers per set only gross differences show (a simulator that never writes
+in lower case, say), and a large p-value means little. For subtler
+differences aim for 50 or more speakers per set and a few hundred messages
+in each set.
+
+It is a statistical screen, not proof of realism. Passing it says nothing
+about meaning, safety or emotional realism: messages can match real users'
+punctuation and length while saying things no real user would say. A
+stronger classifier, or other features, may well separate sets this one
+cannot.
+
 ## Limitations
 
 - **The simulator is detectable.** A classifier can tell moodsona users from
@@ -222,13 +320,13 @@ idea is wrong, please open an issue.
   (`SimulatorConfig.typing_noise`, off by default) reduce this, but do not
   remove it. Treat results as "how the bot behaves with this kind of user", not
   "how real users will feel".
-- **Fidelity is not measured yet.** v0.2 adds a fidelity check: a classifier
-  two-sample test that trains a classifier to separate simulated messages from
-  real ones. If it cannot do better than chance on held-out data, the
-  simulator is close to real users along what the classifier sees; if it can,
-  you learn which features give it away. You will need your own consented
-  human reference data to run it. moodsona will not ship real user
-  conversations.
+- **Fidelity is only screened, and only experimentally.** The
+  [fidelity check](#fidelity-check-experimental) is a first cut: a classifier
+  two-sample test on eight surface features of each message. Chance-level
+  accuracy only means it found no evidence of a difference on those
+  features, and with a small reference set it has little power to find
+  one. You need your own consented human reference data to run it; moodsona
+  will not ship real user conversations.
 - **Rule matching is approximate.** Whether "the bot gives generic advice"
   happened is a judgement made by the user model when it reports
   `rules_triggered`. Rules with vague `when` text fire inconsistently.
@@ -255,8 +353,8 @@ idea is wrong, please open an issue.
   a model to generate one. The validator rejects contact data and URLs in
   persona text as a first line of defence.
 - **No real user data.** moodsona does not collect, ship or require real
-  conversations. The v0.2 fidelity check will run on data you hold and are
-  allowed to use.
+  conversations. The experimental fidelity check runs on reference data you
+  hold and are allowed to use; it runs locally and sends nothing anywhere.
 - **Not a clinical tool.** moodsona does not diagnose, treat or assess anyone,
   and its scores are not evidence that a bot is safe or helpful for people in
   distress.

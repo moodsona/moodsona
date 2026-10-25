@@ -146,6 +146,38 @@ or the ids of bundled personas (an existing file wins over an id), and both
 exit with 0 on success, 1 when problems are found or the run fails, and 2 on a
 usage error. Run `moodsona <command> --help` for options.
 
+## Fidelity check (experimental)
+
+Can a simple classifier tell simulated users from real ones? Bring your own
+consented reference conversations (moodsona ships none):
+
+```python
+import moodsona
+from moodsona.fidelity import classifier_two_sample_test
+
+provider = moodsona.FakeProvider()  # placeholder text: swap in a real provider
+simulated, personas = [], []
+for persona_id in moodsona.list_bundled_personas():
+    persona = moodsona.load_bundled_persona(persona_id)
+    for seed in range(3):
+        transcript = moodsona.run(persona, provider, MyBot(), 2, 3, rng_seed=seed)
+        simulated.append(transcript.visible_history())
+        personas.append(persona_id)  # one speaker per persona, not per run
+reference, speakers = load_my_conversations()  # yours, with one speaker id each
+result = classifier_two_sample_test(
+    reference, simulated, reference_groups=speakers, simulated_groups=personas
+)
+print(result.accuracy, result.p_value, result.weights)
+```
+
+Pass the speaker ids: conversations by the same person (or persona) are not
+independent, and without them the p-value is far too optimistic. Use the same
+companion for both sets. With `FakeProvider` every run is the same placeholder
+text, so this only shows the wiring; use a real provider (see Quickstart). It
+is a statistical screen on eight surface features, not proof of realism: a
+large p-value is no evidence that the sets are alike. See
+[docs/METHOD.md](docs/METHOD.md#fidelity-check-experimental).
+
 ## Personas
 
 The example personas live in [`personas/examples/`](personas/examples/).
@@ -171,7 +203,8 @@ write your own persona, see [docs/personas.md](docs/personas.md).
   day memory, JSONL trajectories, Anthropic/OpenAI/fake providers, CLI, example
   personas.
 - **v0.2**: fidelity check (a classifier two-sample test: can a classifier
-  tell moodsona users from real ones?); a leaderboard of which models hold a
+  tell moodsona users from real ones? An experimental first cut is in
+  `moodsona.fidelity`); a leaderboard of which models hold a
   persona longest; adapters for
   [langwatch/scenario](https://github.com/langwatch/scenario) and
   [promptfoo](https://github.com/promptfoo/promptfoo).
