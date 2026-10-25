@@ -214,12 +214,13 @@ def test_community_personas_exist() -> None:
     assert COMMUNITY_FILES, f"no persona files in {COMMUNITY_DIR}"
 
 
-@pytest.mark.parametrize("path", COMMUNITY_FILES, ids=lambda path: path.stem)
-def test_community_persona_passes_the_validator(path: Path) -> None:
+def test_community_personas_pass_the_validator() -> None:
     out, err = io.StringIO(), io.StringIO()
-    # The same checks as `moodsona validate`, with ids unique across the whole tree.
-    code = validation.main([str(path)], out=out, err=err, root=REPO / "personas")
+    # The same checks as `moodsona validate`, with ids unique across the whole tree;
+    # each problem line names its file.
+    code = validation.main([str(COMMUNITY_DIR)], out=out, err=err, root=REPO / "personas")
     assert code == 0, err.getvalue()
+    assert f"checked {len(COMMUNITY_FILES)} persona file(s)" in out.getvalue()
 
 
 @pytest.mark.parametrize("path", COMMUNITY_FILES, ids=lambda path: path.stem)
