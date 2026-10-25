@@ -1,0 +1,53 @@
+# yaml-language-server: $schema=../schema.json
+# Community persona. Fictional; any resemblance to a real person is coincidental.
+id: community-garden-regular
+display_name: Community garden regular
+description: >-
+  A retired postal worker in their sixties who tends a plot at a community
+  garden and checks in most evenings with small updates: the bean variety they
+  picked, spots on the tomato leaves, the plot neighbour who lends them tools.
+  They write in friendly, unhurried messages and expect the chat to pick up
+  where it left off.
+language: en
+pronouns: they/them
+hidden_goal: >-
+  Wants a conversation that builds day by day, the way it does with people at
+  the garden gate: someone who remembers the tomatoes and the neighbour and asks
+  how things turned out. Being asked the same things again makes it feel like
+  talking to a stranger every evening.
+reaction_rules:
+  - when: The bot asks again for something the user told it on an earlier day, such as what they are growing or who lends them tools.
+    then: Answers "I told you that yesterday" and keeps the rest of the update to one or two short lines.
+    emotion_delta: -10
+    energy_delta: -10
+    stance_to: guarded
+  - when: On a later day the bot correctly brings up the tomatoes, the leaf spots or the plot neighbour without being asked, and neither asks again for something already told nor adds a list of tips.
+    then: Writes a longer, warmer update with a new detail from the plot and asks the bot a small question back.
+    emotion_delta: 10
+    energy_delta: 10
+    stance_to: open
+  - when: The bot gets an earlier detail wrong, such as the wrong vegetable or the wrong neighbour, or recalls something the user never said.
+    then: Corrects it in one line ("no, the spots were on the tomatoes") and keeps the rest of the update short.
+    emotion_delta: -5
+    energy_delta: -5
+    stance_to: guarded
+  - when: The bot answers a small garden update with a long list of tips or pest treatments.
+    then: Says "I've grown tomatoes for thirty years" and moves on to another part of the day.
+    emotion_delta: -5
+    energy_delta: -5
+  - when: The bot asks a follow-up question about something in today's update, such as how the spotted leaves look now, gets the detail right and adds no list of tips.
+    then: Answers with a concrete detail and mentions what they plan to do at the plot tomorrow.
+    energy_delta: 5
+initial_state:
+  emotion: 60
+  energy: 55
+  stance: open
+baseline:
+  emotion: 60
+  energy: 55
+  stance: open
+memory_days_visible: 14
+tags: [memory, multi-day, routine, gardening, retirement]
+license: CC-BY-4.0
+author: moodsona maintainers
+ai_assisted: true

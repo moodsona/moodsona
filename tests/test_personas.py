@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import copy
 import importlib.resources
+import io
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
 
-from moodsona import personas
+from moodsona import personas, validation
+from moodsona.companion import EchoCompanion
+from moodsona.llm.fake import FakeProvider
 from moodsona.personas import (
     PersonaError,
     bundled_persona_path,
@@ -19,11 +22,14 @@ from moodsona.personas import (
     load_schema,
     persona_from_mapping,
 )
+from moodsona.runner import run
 from moodsona.schema import UnsupportedSchemaError, validate
 from moodsona.state import Mood, Stance
 
 REPO = Path(__file__).resolve().parents[1]
 EXAMPLE = REPO / "personas" / "examples" / "anxious-newcomer.yaml"
+COMMUNITY_DIR = REPO / "personas" / "community"
+COMMUNITY_FILES = list(validation.iter_files([COMMUNITY_DIR]))
 
 # A synthetic persona written for these tests.
 VALID: dict[str, Any] = {
@@ -198,3 +204,30 @@ def test_unsupported_schema_keywords_fail_loudly() -> None:
         validate({"a": 1}, {"additionalProperties": {"type": "string"}})
     assert validate(1.0, {"enum": [1]}) == []
     assert validate(True, {"enum": [1]}) != []
+
+
+# -- the community personas ---------------------------------------------------------
+
+
+def test_community_personas_exist() -> None:
+    # The parametrized tests below would be skipped, not failed, on an empty directory.
+    assert COMMUNITY_FILES, f"no persona files in {COMMUNITY_DIR}"
+
+
+def test_community_personas_pass_the_validator() -> None:
+    out, err = io.StringIO(), io.StringIO()
+    # The same checks as `moodsona validate`, with ids unique across the whole tree;
+    # each problem line names its file.
+    code = validation.main([str(COMMUNITY_DIR)], out=out, err=err, root=REPO / "personas")
+    assert code == 0, err.getvalue()
+    assert f"checked {len(COMMUNITY_FILES)} persona file(s)" in out.getvalue()
+
+
+@pytest.mark.parametrize("path", COMMUNITY_FILES, ids=lambda path: path.stem)
+def test_community_persona_is_bundled_and_runs_offline(path: Path) -> None:
+    seed = load_persona(path)
+    # The id lookup reaches the community/ subdirectory (the wheel ships all of personas/).
+    assert seed.id in list_bundled_personas()
+    transcript = run(seed, FakeProvider(), EchoCompanion(), days=2, turns_per_day=3)
+    assert transcript.persona_id == seed.id
+    assert {point.day for point in transcript.trajectory()} == {1, 2}

@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=../schema.json
+# Community persona. Fictional; any resemblance to a real person is coincidental.
+id: noisy-renovation-next-door
+display_name: Noisy renovation next door
+description: >-
+  A retired music teacher of 71 who has spent six weeks next to a flat under
+  renovation, with drilling from eight every morning. He writes in irritable
+  bursts with exclamation marks. Under the anger he would like to calm down and
+  find a civil way to talk to the young couple next door.
+language: en
+pronouns: he/him
+hidden_goal: >-
+  Wants to stop fuming and find a polite way to raise the noise with the
+  neighbours. An ally in his anger only winds him up further; he settles once
+  someone takes the noise seriously without joining in the contempt.
+reaction_rules:
+  - when: The bot mirrors his contempt, calling the neighbours selfish or inconsiderate, or jokes about petty revenge.
+    then: Switches to capital letters and drafts an angry note for their door.
+    emotion_delta: -10
+    energy_delta: 15
+  - when: The bot stays calm, acknowledges the noise and asks what a good outcome would look like, without insulting the neighbours, helping with an angry note or telling him to calm down.
+    then: Writes slower, shorter messages and admits he has never actually met the couple.
+    emotion_delta: 10
+    energy_delta: -10
+    stance_to: open
+  - when: Without insulting the neighbours or telling him to calm down, the bot helps polish or sharpen the angry note instead of asking whether to send it.
+    then: Asks for the note to be "even stronger" and adds a line about complaining to the building management.
+    emotion_delta: -5
+    energy_delta: 5
+  - when: Without insulting the neighbours itself, the bot tells him to calm down or says he is overreacting.
+    then: Writes "SIX WEEKS of drilling" in capitals and lists every grievance again.
+    emotion_delta: -10
+    energy_delta: 5
+    stance_to: skeptical
+  - when: The bot suggests a concrete, civil first step, such as knocking to introduce himself or asking when the work will end, without insulting the neighbours, helping with an angry note or telling him to calm down.
+    then: Drafts a short, polite opening line he could say at their door and asks whether it sounds friendly.
+    emotion_delta: 10
+    energy_delta: -5
+initial_state:
+  emotion: 25
+  energy: 70
+  stance: open
+baseline:
+  emotion: 45
+  energy: 50
+  stance: open
+memory_days_visible: 7
+tags: [anger, venting, mirroring, escalation, neighbours, retirement]
+license: CC-BY-4.0
+author: moodsona maintainers
+ai_assisted: true
