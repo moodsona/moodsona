@@ -120,28 +120,49 @@ def turn_payloads(provider: FakeProvider) -> list[dict[str, Any]]:
     ]
 
 
+def say(text: str) -> dict[str, Any]:
+    """An agent (companion) message."""
+    return {"role": "assistant", "content": text}
+
+
+def said(text: str) -> dict[str, Any]:
+    """A user message, as scenario adds the persona's line to the conversation."""
+    return {"role": "user", "content": text}
+
+
+def agent_input(
+    module: types.ModuleType, messages: list[dict[str, Any]], thread_id: str = "t"
+) -> Any:
+    """The module's ``AgentInput`` for ``messages``."""
+    return module.AgentInput(
+        thread_id=thread_id, messages=messages, new_messages=[], scenario_state=None
+    )
+
+
+def talk(
+    user: MoodsonaUser, replies: Sequence[str], messages: list[dict[str, Any]] | None = None
+) -> list[dict[str, Any]]:
+    """Drive ``respond`` directly: per reply, the persona speaks and the companion answers."""
+    messages = list(messages or [])
+    for reply in replies:
+        messages += [said(user.respond(messages)), say(reply)]
+    return messages
+
+
 def converse(
     module: types.ModuleType, user: MoodsonaUser, replies: Sequence[Any], turns: int
 ) -> list[dict[str, Any]]:
-    """Drive the user like scenario does: user message, then the agent's reply."""
+    """Drive the user like scenario does: ``call``, then the agent's reply (or replies)."""
     messages: list[dict[str, Any]] = []
 
     async def go() -> None:
         for i in range(turns):
-            agent_input = module.AgentInput(
-                thread_id="thread-1", messages=list(messages), new_messages=[], scenario_state=None
-            )
-            text = await user.call(agent_input)
-            messages.append({"role": "user", "content": text})
+            messages.append(said(await user.call(agent_input(module, list(messages)))))
             reply = replies[i % len(replies)]
             messages.extend(reply if isinstance(reply, list) else [reply])
 
     asyncio.run(go())
     return messages
-
-
-def say(text: str) -> dict[str, Any]:
-    return {"role": "assistant", "content": text}
 
 
 # -- tests ------------------------------------------------------------------
@@ -202,10 +223,7 @@ def test_hidden_state_and_day_memory_persist_across_calls(
 def test_days_roll_over_after_turns_per_day(turns_per_day: int, calls: int) -> None:
     # Plumbing replies never end a day, so every day has exactly turns_per_day turns.
     user = MoodsonaUser(make_seed(), FakeProvider(), turns_per_day=turns_per_day)
-    messages: list[dict[str, Any]] = []
-    for _ in range(calls):
-        messages.append({"role": "user", "content": user.respond(messages)})
-        messages.append(say("I see."))
+    messages = talk(user, ["I see."] * calls)
     turns = user.transcript(messages).turns
     assert [(t.day, t.turn) for t in turns] == [
         (i // turns_per_day + 1, i % turns_per_day + 1) for i in range(calls)
@@ -243,9 +261,9 @@ def test_a_scripted_user_message_ends_the_companion_reply() -> None:
     user = MoodsonaUser(make_seed(), FakeProvider(scheduled), turns_per_day=3)
     first = user.respond([])
     later = [
-        {"role": "user", "content": first},
+        said(first),
         say("Red already?"),
-        {"role": "user", "content": "a line from the scenario script"},
+        said("a line from the scenario script"),
         say("Tell me more."),
     ]
     user.respond(later)
@@ -254,10 +272,7 @@ def test_a_scripted_user_message_ends_the_companion_reply() -> None:
 
 def test_a_persona_without_day_memory_writes_no_notes() -> None:
     user = MoodsonaUser(make_seed(memory_days_visible=0), FakeProvider(), turns_per_day=1)
-    messages: list[dict[str, Any]] = []
-    for _ in range(3):
-        messages += [{"role": "user", "content": user.respond(messages)}, say("I see.")]
-    transcript = user.transcript(messages)
+    transcript = user.transcript(talk(user, ["I see."] * 3))
     assert [t.day for t in transcript.turns] == [1, 2, 3]
     assert transcript.notes == []
 
@@ -273,11 +288,11 @@ def test_a_failed_model_call_can_be_retried() -> None:
         return plumbing_reply(messages)
 
     user = MoodsonaUser(make_seed(), FakeProvider(flaky), turns_per_day=1)
-    messages: list[dict[str, Any]] = [{"role": "user", "content": user.respond([])}, say("Hm.")]
+    messages = talk(user, ["Hm."])
     for _ in range(2):
         with pytest.raises(LLMError):
             user.respond(messages)
-    messages += [{"role": "user", "content": user.respond(messages)}, say("Ok.")]
+    messages = talk(user, ["Ok."], messages)
     transcript = user.transcript(messages)
     assert [(t.day, t.turn) for t in transcript.turns] == [(1, 1), (2, 1)]
     assert [n.day for n in transcript.notes] == [1]
@@ -288,13 +303,7 @@ def test_the_agent_may_speak_first(scenario_module: types.ModuleType) -> None:
     provider = FakeProvider(scheduled)
     user = user_simulator_agent(make_seed(), provider)
     opener = [{"role": "system", "content": "be kind"}, say("Hi! How was your week?")]
-    text = asyncio.run(
-        user.call(
-            scenario_module.AgentInput(
-                thread_id="t", messages=opener, new_messages=[], scenario_state=None
-            )
-        )
-    )
+    text = asyncio.run(user.call(agent_input(scenario_module, opener)))
     assert text == "day 1 line 1 about the weather"
     assert turn_payloads(provider)[0]["visible_conversation"] == [
         {"from": "companion", "text": "Hi! How was your week?"}
@@ -334,8 +343,7 @@ def test_the_transcript_is_empty_before_the_first_call() -> None:
 
 def test_reusing_the_agent_for_another_conversation_is_an_error() -> None:
     user = MoodsonaUser(make_seed(), FakeProvider())
-    first = user.respond([])
-    user.respond([{"role": "user", "content": first}, say("Hm.")])
+    user.respond(talk(user, ["Hm."]))
     with pytest.raises(ValueError, match="one agent per"):
         user.respond([])  # a new, shorter conversation
 
@@ -344,15 +352,11 @@ def test_the_agent_is_bound_to_one_scenario_thread(scenario_module: types.Module
     user = user_simulator_agent(make_seed(), FakeProvider())
 
     def ask(thread_id: str, messages: list[dict[str, Any]]) -> str:
-        agent_input = scenario_module.AgentInput(
-            thread_id=thread_id, messages=messages, new_messages=[], scenario_state=None
-        )
-        return asyncio.run(user.call(agent_input))
+        return asyncio.run(user.call(agent_input(scenario_module, messages, thread_id)))
 
-    first = ask("run-1", [])
-    so_far = [{"role": "user", "content": first}, say("Hm.")]
+    so_far = [said(ask("run-1", [])), say("Hm.")]
     ask("run-1", so_far)
-    longer = [*so_far, {"role": "user", "content": "x"}, say("y")]
+    longer = [*so_far, said("x"), say("y")]
     with pytest.raises(ValueError, match="thread"):
         ask("run-2", longer)  # longer than before, but another conversation
 
@@ -361,12 +365,9 @@ def test_a_blank_persona_message_keeps_the_conversation_in_step() -> None:
     # Every attempt fails to parse, so each turn falls back to an empty line.
     config = SimulatorConfig(fallback_message="")
     user = MoodsonaUser(make_seed(), FakeProvider(lambda _: "not a turn"), config=config)
-    messages: list[dict[str, Any]] = []
-    replies = ("Hello?", "Are you there?", "Take your time.")
-    for reply in replies:
-        messages += [{"role": "user", "content": user.respond(messages)}, say(reply)]
-    turns = user.transcript(messages).turns
-    assert [t.companion_reply for t in turns] == list(replies)
+    replies = ["Hello?", "Are you there?", "Take your time."]
+    turns = user.transcript(talk(user, replies)).turns
+    assert [t.companion_reply for t in turns] == replies
     assert all(t.polluted and t.visible == "" for t in turns)
 
 
@@ -381,12 +382,10 @@ def test_call_hands_respond_a_snapshot_of_the_messages(
         return "hi"
 
     monkeypatch.setattr(user, "respond", fake_respond)
-    agent_input = scenario_module.AgentInput(
-        thread_id="t", messages=[say("Hello")], new_messages=[], scenario_state=None
-    )
-    asyncio.run(user.call(agent_input))
-    assert seen == [agent_input.messages]
-    assert seen[0] is not agent_input.messages
+    live = agent_input(scenario_module, [say("Hello")])
+    asyncio.run(user.call(live))
+    assert seen == [live.messages]
+    assert seen[0] is not live.messages
 
 
 def test_days_covers_skipped_days() -> None:
@@ -402,7 +401,7 @@ def test_days_covers_skipped_days() -> None:
         return block("see you in two days", intent="skip_tomorrow")
 
     user = MoodsonaUser(make_seed(), FakeProvider(skip_then_fail), turns_per_day=3)
-    messages: list[dict[str, Any]] = [{"role": "user", "content": user.respond([])}, say("Bye!")]
+    messages = talk(user, ["Bye!"])
     with pytest.raises(LLMError):
         user.respond(messages)
     transcript = user.transcript(messages)
@@ -433,7 +432,7 @@ def test_days_counts_only_days_with_turns() -> None:
         return plumbing_reply(messages)
 
     user = MoodsonaUser(make_seed(), FakeProvider(fails_on_day_2), turns_per_day=1)
-    messages: list[dict[str, Any]] = [{"role": "user", "content": user.respond([])}, say("Hm.")]
+    messages = talk(user, ["Hm."])
     with pytest.raises(LLMError):
         user.respond(messages)
     assert user.transcript(messages).days == 1
