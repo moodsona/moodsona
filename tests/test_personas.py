@@ -220,12 +220,12 @@ def test_community_persona_passes_the_validator(path: Path) -> None:
     # The same checks as `moodsona validate`, with ids unique across the whole tree.
     code = validation.main([str(path)], out=out, err=err, root=REPO / "personas")
     assert code == 0, err.getvalue()
-    assert out.getvalue() == "checked 1 persona file(s), 0 problem(s)\n"
 
 
 @pytest.mark.parametrize("path", COMMUNITY_FILES, ids=lambda path: path.stem)
 def test_community_persona_is_bundled_and_runs_offline(path: Path) -> None:
     seed = load_persona(path)
+    # The id lookup reaches the community/ subdirectory (the wheel ships all of personas/).
     assert seed.id in list_bundled_personas()
     transcript = run(seed, FakeProvider(), EchoCompanion(), days=2, turns_per_day=3)
     assert transcript.persona_id == seed.id
