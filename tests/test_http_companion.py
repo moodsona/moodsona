@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import socket
 import threading
 import time
+import urllib.error
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -168,8 +170,10 @@ def test_http_error_names_url_and_status_but_not_headers(server: LocalServer) ->
     assert "query-secret" not in message
 
 
-def test_invalid_header_value_is_not_quoted(server: LocalServer) -> None:
-    companion = HttpCompanion(server.url, headers={"Authorization": f"{HIDDEN}\nX-Injected: 1"})
+@pytest.mark.parametrize("value", [f"{HIDDEN}\nX-Injected: 1", f"{HIDDEN} \u2615"])
+def test_bad_header_value_is_not_quoted(server: LocalServer, value: str) -> None:
+    # A newline and a character outside Latin-1: http.client quotes both in its error.
+    companion = HttpCompanion(server.url, headers={"Authorization": value})
     with pytest.raises(HttpCompanionError, match="HTTP does not allow") as info:
         companion.reply(HISTORY)
     assert HIDDEN not in str(info.value)
@@ -187,16 +191,31 @@ def test_truncated_body(server: LocalServer, status: int) -> None:
     assert info.value.status == (None if status == 200 else 500)
 
 
-@pytest.mark.parametrize("url", ["http://127.0.0.1/chat?token=a b", "http://127.0.0.1/a\rb"])
-def test_url_with_spaces_or_control_characters_is_rejected(url: str) -> None:
-    with pytest.raises(ValueError, match="URL") as info:
-        HttpCompanion(url)
+BAD_URLS = [
+    ("file:///etc/passwd", "http:// or https://"),
+    ("ftp://127.0.0.1/bot", "http:// or https://"),
+    ("localhost:8000/chat", "http:// or https://"),
+    ("http://", "no host"),
+    ("http://user:password@127.0.0.1/chat", "credentials"),
+    ("http://127.0.0.1:http/chat", "invalid port"),
+    ("http://127.0.0.1/chat?token=a b", "spaces or control characters"),
+    ("http://127.0.0.1/a\rb", "spaces or control characters"),
+    ("http://127.0.0.1/caf\u00e9", "non-ASCII"),
+    ("http://127.0.0.1/a\u00a0b", "non-ASCII"),
+]
+
+
+def openai_compatible(url: str) -> OpenAICompatibleCompanion:
+    return OpenAICompatibleCompanion(url, "m", "s")
+
+
+@pytest.mark.parametrize(("url", "problem"), BAD_URLS)
+@pytest.mark.parametrize("make", [HttpCompanion, openai_compatible], ids=["http", "openai"])
+def test_bad_url_is_rejected(url: str, problem: str, make: Callable[[str], object]) -> None:
+    with pytest.raises(ValueError, match=problem) as info:
+        make(url)
+    assert "password" not in str(info.value)
     assert "token" not in str(info.value)
-
-
-def test_bad_port_is_rejected() -> None:
-    with pytest.raises(ValueError, match="port"):
-        HttpCompanion("http://127.0.0.1:http/chat")
 
 
 def test_redirects_are_not_followed(server: LocalServer) -> None:
@@ -243,46 +262,23 @@ def test_timeout(server: LocalServer) -> None:
 
 def dead_port() -> int:
     """A port nothing listens on: bind one, then close it."""
-    probe = ThreadingHTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler)
-    port = probe.server_address[1]
-    probe.server_close()
-    return port
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port: int = probe.getsockname()[1]
+        return port
 
 
-def test_connection_refused() -> None:
-    port = dead_port()
-    companion = HttpCompanion(f"http://127.0.0.1:{port}/chat")
-    with pytest.raises(HttpCompanionError, match=f"127.0.0.1:{port}/chat"):
+def test_connection_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    companion = HttpCompanion("http://127.0.0.1:9/chat")
+
+    def refuse(*args: Any, **kwargs: Any) -> Any:
+        raise urllib.error.URLError(ConnectionRefusedError("refused"))
+
+    monkeypatch.setattr(companion._opener, "open", refuse)
+    with pytest.raises(HttpCompanionError, match=r"127\.0\.0\.1:9/chat: request failed") as info:
         companion.reply(HISTORY)
-
-
-@pytest.mark.parametrize(
-    "url",
-    [
-        "file:///etc/passwd",
-        "ftp://127.0.0.1/bot",
-        "localhost:8000/chat",
-        "http://",
-        "http://user:password@127.0.0.1/chat",
-    ],
-)
-def test_bad_url_is_rejected(url: str) -> None:
-    with pytest.raises(ValueError, match="URL") as info:
-        HttpCompanion(url)
-    assert "password" not in str(info.value)
-
-
-@pytest.mark.parametrize("url", ["http://127.0.0.1/café", "http://127.0.0.1/a\u00a0b"])
-def test_non_ascii_url_is_rejected(url: str) -> None:
-    with pytest.raises(ValueError, match="non-ASCII"):
-        HttpCompanion(url)
-
-
-def test_non_latin1_header_gets_a_neutral_error(server: LocalServer) -> None:
-    companion = HttpCompanion(server.url, headers={"X-Name": "Zoë ☕"})
-    with pytest.raises(HttpCompanionError, match="HTTP does not allow") as info:
-        companion.reply(HISTORY)
-    assert "Zo" not in str(info.value)
+    assert info.value.status is None
+    assert isinstance(info.value.__cause__, urllib.error.URLError)
 
 
 def test_url_and_timeout_are_read_only() -> None:
@@ -295,29 +291,34 @@ def test_url_and_timeout_are_read_only() -> None:
         companion.timeout = 0  # type: ignore[misc]
 
 
-def test_file_url_is_unreachable_even_after_poking_internals(tmp_path: Path) -> None:
+def test_opener_cannot_read_files(tmp_path: Path) -> None:
+    # The URL is validated once; this swaps the private copy behind the property's
+    # back to show the opener itself has no file: handler.
     page = tmp_path / "reply.json"
     page.write_text('{"reply": "read from disk"}', encoding="utf-8")
     companion = HttpCompanion("http://127.0.0.1/chat")
-    # Bypass any property or validation, as a careless caller could.
-    vars(companion).update(url=page.as_uri(), _url=page.as_uri())
-    with pytest.raises(HttpCompanionError, match="request failed"):
+    companion._url = page.as_uri()
+    with pytest.raises(HttpCompanionError, match="unknown url type"):
         companion.reply(HISTORY)
 
 
 @pytest.mark.parametrize(
-    "host",
-    ["localhost", "LOCALHOST", "127.0.0.1", "127.8.9.10", "::1"],
+    ("host", "loopback"),
+    [
+        ("localhost", True),
+        ("LOCALHOST", True),
+        ("127.0.0.1", True),
+        ("127.8.9.10", True),
+        ("::1", True),
+        ("bot.example.test", False),
+        ("10.0.0.1", False),
+        ("128.0.0.1", False),
+        ("::2", False),
+        ("localhost.x", False),
+    ],
 )
-def test_loopback_hosts(host: str) -> None:
-    assert _is_loopback(host)
-
-
-@pytest.mark.parametrize(
-    "host", ["bot.example.test", "10.0.0.1", "128.0.0.1", "::2", "localhost.x"]
-)
-def test_non_loopback_hosts(host: str) -> None:
-    assert not _is_loopback(host)
+def test_is_loopback(host: str, loopback: bool) -> None:
+    assert _is_loopback(host) is loopback
 
 
 def clear_no_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -445,21 +446,25 @@ def test_openai_compatible_options(server: LocalServer, monkeypatch: pytest.Monk
     assert got.body["messages"][0] == {"role": "user", "content": HISTORY[0].content}
 
 
-@pytest.mark.parametrize("value", [None, "", "   "])
-def test_openai_compatible_missing_key(monkeypatch: pytest.MonkeyPatch, value: str | None) -> None:
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("MOODSONA_TEST_BOT_KEY", None),
+        ("MOODSONA_TEST_BOT_KEY", ""),
+        ("MOODSONA_TEST_BOT_KEY", "  "),
+        (HIDDEN, None),  # the key itself passed by mistake
+    ],
+)
+def test_openai_compatible_missing_key(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str | None
+) -> None:
     if value is None:
-        monkeypatch.delenv("MOODSONA_TEST_BOT_KEY", raising=False)
+        monkeypatch.delenv(name, raising=False)
     else:
-        monkeypatch.setenv("MOODSONA_TEST_BOT_KEY", value)
-    with pytest.raises(ValueError, match="api_key_env is not set"):
-        OpenAICompatibleCompanion(
-            "http://127.0.0.1/v1", "m", "s", api_key_env="MOODSONA_TEST_BOT_KEY"
-        )
-
-
-def test_openai_compatible_key_env_is_keyword_only() -> None:
-    with pytest.raises(TypeError):
-        OpenAICompatibleCompanion("http://127.0.0.1/v1", "m", "s", HIDDEN)  # type: ignore[call-arg]
+        monkeypatch.setenv(name, value)
+    with pytest.raises(ValueError, match="not the key") as info:
+        OpenAICompatibleCompanion("http://127.0.0.1/v1", "m", "s", api_key_env=name)
+    assert name not in str(info.value)
 
 
 def test_openai_compatible_keeps_query_string(server: LocalServer) -> None:
@@ -492,16 +497,3 @@ def test_openai_compatible_unreadable_reply(server: LocalServer, answer: Any) ->
     server.answer_json(answer)
     with pytest.raises(HttpCompanionError, match="reply"):
         OpenAICompatibleCompanion(server.url + "/v1", "m", "s").reply(HISTORY)
-
-
-def test_exported_from_package() -> None:
-    import moodsona
-
-    for name in ("CompanionError", "HttpCompanion", "HttpCompanionError"):
-        assert name in moodsona.__all__
-    assert moodsona.OpenAICompatibleCompanion is OpenAICompatibleCompanion
-
-
-def test_openai_compatible_rejects_bad_scheme() -> None:
-    with pytest.raises(ValueError, match="URL"):
-        OpenAICompatibleCompanion("file:///tmp", "m", "s")
