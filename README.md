@@ -95,10 +95,13 @@ For real runs, use `AnthropicProvider` (from `moodsona.llm.anthropic`) or
 matching extra, read the SDK's usual API key environment variable, and take the
 model id as an argument or from `MOODSONA_ANTHROPIC_MODEL` /
 `MOODSONA_OPENAI_MODEL`; see their docstrings. Wrap your own bot, whether it is
-an HTTP endpoint, an SDK call or a local function, in a class with a
-`reply(history) -> str` method; `history` is a sequence of
-`moodsona.ChatMessage` (`role`, `content`) with everything the bot has seen so
-far. `moodsona.list_bundled_personas()` lists the shipped persona ids.
+an SDK call or a local function, in a class with a `reply(history) -> str`
+method; `history` is a sequence of `moodsona.ChatMessage` (`role`, `content`)
+with everything the bot has seen so far. A bot behind an HTTP endpoint needs no
+wrapper: use `HttpCompanion(url)`, or `OpenAICompatibleCompanion(base_url,
+model, system_prompt)` for a model on a chat-completions server such as Ollama,
+LM Studio or vLLM; see [docs/integrations/your-bot.md](docs/integrations/your-bot.md).
+`moodsona.list_bundled_personas()` lists the shipped persona ids.
 
 The language checks (wrong-language rail, agreement and ask-back ceilings,
 optional typing noise) use the persona's `language` profile by default; pass

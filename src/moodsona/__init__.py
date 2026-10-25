@@ -11,10 +11,20 @@ Quick start (offline)::
 
 Swap ``FakeProvider()`` for ``AnthropicProvider()`` or ``OpenAIProvider()``
 (from ``moodsona.llm.anthropic`` / ``moodsona.llm.openai``) and ``EchoCompanion``
-for your own chatbot wrapped in the :class:`Companion` protocol.
+for your own chatbot wrapped in the :class:`Companion` protocol (or reached
+over HTTP with :class:`HttpCompanion` / :class:`OpenAICompatibleCompanion`).
 """
 
-from moodsona.companion import Companion, EchoCompanion, ScriptedCompanion, ScriptExhaustedError
+from moodsona.companion import (
+    Companion,
+    CompanionError,
+    EchoCompanion,
+    HttpCompanion,
+    HttpCompanionError,
+    OpenAICompatibleCompanion,
+    ScriptedCompanion,
+    ScriptExhaustedError,
+)
 from moodsona.llm import ChatMessage, FakeProvider, LLMError, LLMProvider, LLMResponse
 from moodsona.parse import HiddenBlock, ParseError
 from moodsona.personas import (
@@ -41,15 +51,19 @@ from moodsona.version import __version__
 __all__ = [
     "ChatMessage",
     "Companion",
+    "CompanionError",
     "DayNote",
     "EchoCompanion",
     "FakeProvider",
     "HiddenBlock",
+    "HttpCompanion",
+    "HttpCompanionError",
     "Intent",
     "LLMError",
     "LLMProvider",
     "LLMResponse",
     "Mood",
+    "OpenAICompatibleCompanion",
     "ParseError",
     "PersonaError",
     "PersonaSeed",
