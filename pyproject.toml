@@ -62,9 +62,19 @@ dev = [
   "ruff>=0.17",
   "types-PyYAML>=6.0.12",
 ]
+# Experimental adapter: moodsona as the user simulator of a langwatch/scenario test
+# (moodsona.adapters.scenario). It uses only AgentAdapter, AgentRole.USER and AgentInput.
+scenario = ["langwatch-scenario>=1.6"]
 
 [project.scripts]
 moodsona = "moodsona.cli:main"
+
+[tool.uv]
+# Resolve the scenario extra in its own fork, so that its dependency tree (which
+# needs older openai and filelock) does not move the pins of every other install.
+# The cost: `uv sync --extra openai --extra scenario` is refused in this repo;
+# pip installs of moodsona[openai,scenario] are not affected.
+conflicts = [[{ extra = "scenario" }, { extra = "openai" }]]
 
 [project.urls]
 Homepage = "https://github.com/moodsona/moodsona"
