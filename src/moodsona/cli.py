@@ -1,17 +1,21 @@
-"""Command line interface: ``moodsona validate`` and ``moodsona smoke``.
+"""Command line interface: ``moodsona validate``, ``smoke``, ``run``, ``report`` and ``bench``.
 
-Both commands take persona file paths or the ids of bundled personas
-(``moodsona smoke anxious-newcomer``). Only a bare name (no directory part, no
-``.yaml``/``.yml`` suffix) is looked up as an id, and only when no file of that
-name exists (for ``validate``: no file or directory).
+``validate``, ``smoke`` and ``run`` take persona file paths or the ids of
+bundled personas (``moodsona smoke anxious-newcomer``). Only a bare name (no
+directory part, no ``.yaml``/``.yml`` suffix) is looked up as an id, and only
+when no file of that name exists (for ``validate``: no file or directory).
 
 Exit codes:
     0: success.
-    1: ``validate`` found problems, ``smoke`` could not load or run the persona,
-       ``report`` could not read the transcript, or ``bench`` failed.
+    1: ``validate`` found problems, ``smoke`` or ``run`` could not load or run
+       the persona (or ``run`` could not write the transcript), ``report``
+       could not read the transcript, or ``bench`` failed.
     2: usage error (unknown command or bad arguments, printed by argparse; or
        ``validate`` got a missing path or found no persona file to check; or
-       ``bench`` got an unknown persona, or a paid provider without ``--yes``).
+       ``bench`` got an unknown persona; or ``run`` got an unknown companion
+       spec, an unreadable or empty script file, or an ``--out`` it cannot
+       write, or a paid run would overwrite an existing ``--out``; or ``bench``
+       or ``run`` got a paid provider without ``--yes``).
 """
 
 from __future__ import annotations
@@ -19,17 +23,30 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
 from collections.abc import Sequence
 from pathlib import Path
+from typing import TextIO
 
 from moodsona import bench
-from moodsona.companion import EchoCompanion
+from moodsona.companion import Companion, EchoCompanion, ScriptedCompanion
 from moodsona.llm.base import LLMError
 from moodsona.llm.fake import FakeProvider
+from moodsona.metrics import (
+    TranscriptMetrics,
+    compute_metrics,
+    format_number,
+    format_share,
+    metrics_from_jsonl,
+)
 from moodsona.personas import PersonaError, bundled_persona_path, load_persona
-from moodsona.runner import run
+from moodsona.runner import Transcript, run
+from moodsona.state import PersonaSeed
 from moodsona.validation import YAML_SUFFIXES
 from moodsona.validation import main as validate_main
+
+#: The ``moodsona run --companion`` specs, as shown in help and error messages.
+COMPANION_SPECS = ("echo", "script:<file>")
 
 
 def _positive(text: str) -> int:
@@ -63,6 +80,35 @@ def _parser() -> argparse.ArgumentParser:
     smoke.add_argument("--days", type=int, default=1, help="simulated days (default: 1)")
     smoke.add_argument("--turns", type=int, default=3, help="turns per day (default: 3)")
     smoke.add_argument("--seed", type=int, default=0, help="random seed (default: 0)")
+    run_cmd = commands.add_parser(
+        "run",
+        help="run one persona against a companion, write the transcript JSONL and print "
+        "its mood and metrics (a real provider costs money)",
+    )
+    run_cmd.add_argument(
+        "persona", help="path to a persona YAML file, or a bundled persona id (anxious-newcomer)"
+    )
+    run_cmd.add_argument(
+        "--provider", choices=bench.PROVIDERS, default="fake", help="the user model (default: fake)"
+    )
+    run_cmd.add_argument("--model", help="model id for anthropic/openai (default: the adapter's)")
+    run_cmd.add_argument(
+        "--companion",
+        default="echo",
+        help=f"the companion under test: {' or '.join(COMPANION_SPECS)}, a UTF-8 file with "
+        "one reply per line, used in order and then from the start again (default: echo)",
+    )
+    run_cmd.add_argument("--days", type=_positive, default=3, help="simulated days (default: 3)")
+    run_cmd.add_argument("--turns", type=_positive, default=6, help="turns per day (default: 6)")
+    run_cmd.add_argument("--seed", type=int, default=0, help="random seed (default: 0)")
+    run_cmd.add_argument(
+        "--out",
+        default="run.jsonl",
+        help="transcript JSONL to write; a paid run never overwrites one (default: run.jsonl)",
+    )
+    run_cmd.add_argument(
+        "--yes", action="store_true", help="confirm that a paid provider may be called"
+    )
     report = commands.add_parser(
         "report", help="print metrics of a transcript JSONL (how well the persona was held)"
     )
@@ -135,14 +181,29 @@ def _validate(args: argparse.Namespace) -> int:
     return validate_main(paths)
 
 
-def _smoke(args: argparse.Namespace) -> int:
+def _load_cli_persona(arg: str) -> PersonaSeed | None:
+    """Load the persona ``arg`` (a file or a bundled id); print the problem and return None."""
     try:
-        seed = load_persona(_persona_path(args.persona, dirs=False))
+        return load_persona(_persona_path(arg, dirs=False))
     except KeyError as exc:  # only the id lookup raises it; load_persona checks the schema first
-        sys.stderr.write(f"{args.persona}: no such file, and {exc.args[0]}\n")
-        return 1
+        sys.stderr.write(f"{arg}: no such file, and {exc.args[0]}\n")
     except (PersonaError, FileNotFoundError) as exc:  # FileNotFoundError: broken install
         sys.stderr.write(f"{exc}\n")
+    return None
+
+
+def _write_trajectory(out: TextIO, transcript: Transcript) -> None:
+    """Write the day / turn / emotion / energy / stance table of a run."""
+    out.write(f"{'day':>3} {'turn':>4} {'emotion':>7} {'energy':>6}  stance\n")
+    for point in transcript.trajectory():
+        out.write(
+            f"{point.day:>3} {point.turn:>4} {point.emotion:>7} {point.energy:>6}  {point.stance}\n"
+        )
+
+
+def _smoke(args: argparse.Namespace) -> int:
+    seed = _load_cli_persona(args.persona)
+    if seed is None:
         return 1
     if args.days < 1 or args.turns < 1:
         sys.stderr.write("--days and --turns must be at least 1\n")
@@ -154,26 +215,112 @@ def _smoke(args: argparse.Namespace) -> int:
         return 1
     out = sys.stdout
     out.write(f"persona {seed.id}: {len(transcript.turns)} turn(s), offline fake model\n")
-    out.write(f"{'day':>3} {'turn':>4} {'emotion':>7} {'energy':>6}  stance\n")
-    for point in transcript.trajectory():
-        out.write(
-            f"{point.day:>3} {point.turn:>4} {point.emotion:>7} {point.energy:>6}  {point.stance}\n"
-        )
+    _write_trajectory(out, transcript)
     return 0
 
 
-def _report(args: argparse.Namespace) -> int:
-    from moodsona.metrics import format_number, format_share, metrics_from_jsonl
+def _read_script(path: str) -> list[str]:
+    """The replies in a script file: one per line, blank lines skipped.
 
-    num, pct = format_number, format_share
+    Raises:
+        ValueError: The file cannot be read, is not UTF-8, or has no replies.
+    """
     try:
-        m = metrics_from_jsonl(args.transcript)
-    except (OSError, ValueError) as exc:
-        sys.stderr.write(f"{exc}\n")
+        text = Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError(f"cannot read the script file {path}: {exc}") from exc
+    # read_text turns \r\n into \n; split on it only, so a reply stays one line.
+    replies = [line for line in text.split("\n") if line.strip()]
+    if not replies:
+        raise ValueError(f"the script file {path} has no replies (one reply per line)")
+    return replies
+
+
+def _companion(spec: str) -> Companion:
+    """The companion for a ``--companion`` spec (see :data:`COMPANION_SPECS`).
+
+    Raises:
+        ValueError: An unknown spec, or a script file that cannot be used.
+    """
+    kind, _, arg = spec.partition(":")
+    if spec == "echo":
+        return EchoCompanion()
+    if kind == "script" and arg:
+        return ScriptedCompanion(_read_script(arg), cycle=True)
+    raise ValueError(f"unknown companion {spec!r}; use {' or '.join(COMPANION_SPECS)}")
+
+
+def _refuse_paid(provider: str, yes: bool, personas: int, days: int, turns: int) -> bool:
+    """Print the cost estimate and return True when a paid provider lacks ``--yes``."""
+    if provider == "fake" or yes:
+        return False
+    calls = bench.max_model_calls(personas, days, turns)
+    sys.stderr.write(
+        f"--provider {provider} calls a paid API and costs money: up to {calls} model "
+        f"calls ({personas} persona(s) x {days} day(s) x {turns} turn(s)). "
+        "Add --yes to run it.\n"
+    )
+    return True
+
+
+def _check_out(path: Path, *, paid: bool) -> str | None:
+    """The problem with ``--out`` that can be seen without writing anything, or None."""
+    if path.is_dir():
+        return f"--out {path}: is a directory"
+    if paid and path.exists():
+        return (
+            f"--out {path}: already exists, and a paid run does not overwrite it; "
+            "choose another --out or remove the file"
+        )
+    return None
+
+
+def _run(args: argparse.Namespace) -> int:
+    err, out = sys.stderr, sys.stdout
+    seed = _load_cli_persona(args.persona)
+    if seed is None:
         return 1
-    if args.json:
-        sys.stdout.write(json.dumps(m.to_dict(), indent=2) + "\n")
-        return 0
+    try:
+        companion = _companion(args.companion)
+    except ValueError as exc:
+        err.write(f"--companion: {exc}\n")
+        return 2
+    target = Path(args.out)
+    problem = _check_out(target, paid=args.provider != "fake")
+    if problem:
+        err.write(f"{problem}\n")
+        return 2
+    if _refuse_paid(args.provider, args.yes, 1, args.days, args.turns):
+        return 2
+    try:  # make sure the transcript can be written before the first (maybe paid) call
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryFile(dir=target.parent):
+            pass
+    except OSError as exc:
+        err.write(f"--out {target}: cannot write there: {exc}\n")
+        return 2
+    try:
+        provider = bench.make_provider(args.provider, args.model)
+        transcript = run(seed, provider, companion, args.days, args.turns, args.seed)
+        transcript.to_jsonl(target)
+    except (LookupError, LLMError, OSError) as exc:  # LLMError: e.g. the SDK is not installed
+        err.write(f"{exc}\n")
+        return 1
+    label = bench.model_label(args.provider, provider)
+    out.write(
+        f"persona {seed.id}: {len(transcript.turns)} turn(s), "
+        f"model {label}, companion {args.companion}\n"
+    )
+    _write_trajectory(out, transcript)
+    out.write(f"wrote {target}\n")
+    lines = _summary_lines(compute_metrics(transcript, language=seed.language))
+    out.write("\n".join(lines) + "\n")
+    return 0
+
+
+def _summary_lines(m: TranscriptMetrics) -> list[str]:
+    """The compact metrics table that ``moodsona report`` prints."""
+    num, pct = format_number, format_share
     lines = [
         f"persona {m.persona_id} (seed {m.rng_seed}): {m.turns} turn(s) on "
         f"{m.active_days} active day(s), {m.days_skipped} day(s) skipped",
@@ -201,7 +348,19 @@ def _report(args: argparse.Namespace) -> int:
         ("forced", pct(m.forced_share)),
     ]
     lines += [f"{label:<15}{value}" for label, value in rows]
-    sys.stdout.write("\n".join(lines) + "\n")
+    return lines
+
+
+def _report(args: argparse.Namespace) -> int:
+    try:
+        m = metrics_from_jsonl(args.transcript)
+    except (OSError, ValueError) as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 1
+    if args.json:
+        sys.stdout.write(json.dumps(m.to_dict(), indent=2) + "\n")
+        return 0
+    sys.stdout.write("\n".join(_summary_lines(m)) + "\n")
     return 0
 
 
@@ -215,13 +374,7 @@ def _bench(args: argparse.Namespace) -> int:
     except (PersonaError, FileNotFoundError) as exc:  # FileNotFoundError: broken install
         err.write(f"{exc}\n")
         return 1
-    if args.provider != "fake" and not args.yes:
-        calls = bench.max_model_calls(len(personas), args.days, args.turns)
-        err.write(
-            f"--provider {args.provider} calls a paid API and costs money: up to {calls} model "
-            f"calls ({len(personas)} persona(s) x {args.days} day(s) x {args.turns} turn(s)). "
-            "Add --yes to run it.\n"
-        )
+    if _refuse_paid(args.provider, args.yes, len(personas), args.days, args.turns):
         return 2
     try:
         provider = bench.make_provider(args.provider, args.model)
@@ -256,6 +409,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _report(args)
     if args.command == "bench":
         return _bench(args)
+    if args.command == "run":
+        return _run(args)
     if args.command == "validate":
         return _validate(args)
     return _smoke(args)
