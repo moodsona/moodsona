@@ -238,8 +238,9 @@ from the briefs in [docs/persona-ideas.md](docs/persona-ideas.md):
 | [`noisy-renovation-next-door`](personas/community/noisy-renovation-next-door.yaml) | Six weeks of drilling next door; angry, wants to find a civil way to talk | Mirroring and escalating anger |
 
 Both sets are bundled with the package, so `moodsona validate` and
-`moodsona bench` cover all twelve by default (with a real provider and the
-default 3 days of 6 turns, that is up to 720 model calls per model).
+`moodsona bench` cover both by default. Each new persona makes a default bench
+run with a real provider cost more; the bench prints the worst-case number of
+calls before it starts.
 
 Personas do not contain crisis or self-harm scenarios. That is out of scope for
 v0.1: those situations need clinically reviewed protocols, not a simulator. To
