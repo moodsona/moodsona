@@ -14,18 +14,19 @@ standard library.
 
 from __future__ import annotations
 
-import http.client
-import ipaddress
 import json
 import os
-import urllib.error
-import urllib.parse
-import urllib.request
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from moodsona.llm.base import ChatMessage
 from moodsona.version import __version__
+
+if TYPE_CHECKING:
+    # The HTTP modules (urllib.request pulls in http.client, ssl and email) are
+    # imported where they are used, so `import moodsona` stays cheap.
+    import urllib.request
+    from urllib.parse import SplitResult
 
 
 @runtime_checkable
@@ -165,6 +166,8 @@ def reply_field(body: Any) -> str:
 
 def _is_loopback(host: str) -> bool:
     """True for ``localhost`` and loopback addresses (127.0.0.0/8, ::1)."""
+    import ipaddress
+
     if host.lower() == "localhost":
         return True
     try:
@@ -182,6 +185,8 @@ def _opener(host: str) -> urllib.request.OpenerDirector:
     honoured, except for loopback hosts, so local traffic and its headers never
     go to a proxy.
     """
+    import urllib.request
+
     opener = urllib.request.OpenerDirector()
     handlers: list[urllib.request.BaseHandler] = [
         urllib.request.HTTPHandler(),
@@ -197,8 +202,10 @@ def _opener(host: str) -> urllib.request.OpenerDirector:
     return opener
 
 
-def _check_url(url: str) -> str:
-    """Validate an http(s) URL and return it without query string or fragment."""
+def _check_url(url: str) -> SplitResult:
+    """Validate an http(s) URL and return its parts."""
+    import urllib.parse
+
     # Checked before parsing: http.client would otherwise reject these later with
     # a message that quotes the path and query string.
     if not url.isascii():
@@ -216,7 +223,7 @@ def _check_url(url: str) -> str:
         parts.port  # noqa: B018 - raises ValueError for a port that is not a number
     except ValueError:
         raise ValueError("the URL has an invalid port") from None
-    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+    return parts
 
 
 class HttpCompanion:
@@ -258,10 +265,11 @@ class HttpCompanion:
         request: RequestBuilder = messages_request,
         response: ResponseReader = reply_field,
     ) -> None:
-        self._safe_url = _check_url(url)
+        parts = self._endpoint(_check_url(url))
         if timeout <= 0:
             raise ValueError("timeout must be positive")
-        self._url = url
+        self._url = parts.geturl()
+        self._safe_url = parts._replace(query="", fragment="").geturl()  # for messages
         self._timeout = timeout
         self.request = request
         self.response = response
@@ -271,11 +279,15 @@ class HttpCompanion:
             "User-Agent": f"moodsona/{__version__}",
             **(headers or {}),
         }
-        self._opener = _opener(urllib.parse.urlsplit(url).hostname or "")
+        self._opener = _opener(parts.hostname or "")
+
+    def _endpoint(self, parts: SplitResult) -> SplitResult:
+        """The URL to post to, from the validated ``url``; subclasses may adjust it."""
+        return parts
 
     @property
     def url(self) -> str:
-        """The endpoint, as given (read-only: it was validated once)."""
+        """The endpoint (read-only: it was validated once)."""
         return self._url
 
     @property
@@ -296,6 +308,8 @@ class HttpCompanion:
             payload = json.dumps(self.request(history), ensure_ascii=False, allow_nan=False)
         except Exception as exc:  # the builder is the caller's code; any failure is theirs
             raise self._error(f"could not build the request ({type(exc).__name__})") from exc
+        import urllib.request
+
         # S310: the scheme was checked in __init__ (http/https only), and the
         # opener has no file:, ftp: or data: handler anyway.
         req = urllib.request.Request(  # noqa: S310
@@ -308,7 +322,7 @@ class HttpCompanion:
             raise self._error("the response is not JSON", body=raw) from None
         try:
             reply = self.response(body)
-        except (LookupError, TypeError, ValueError, AttributeError) as exc:
+        except Exception as exc:  # the reader is the caller's code, like the builder
             # Only the type: the exception text may quote the response body.
             problem = f"could not read the reply from the response ({type(exc).__name__})"
             raise self._error(problem) from exc
@@ -317,6 +331,9 @@ class HttpCompanion:
         return reply
 
     def _send(self, req: urllib.request.Request) -> bytes:
+        import http.client
+        import urllib.error
+
         try:
             with self._opener.open(req, timeout=self._timeout) as answer:
                 raw: bytes = answer.read()
@@ -383,8 +400,8 @@ class OpenAICompatibleCompanion(HttpCompanion):
 
     Raises:
         ValueError: The URL is invalid (see :class:`HttpCompanion`), or
-            ``api_key_env`` is not a variable name or names a variable that
-            is unset or empty. The message never repeats ``api_key_env``.
+            ``api_key_env`` names a variable that is unset or empty. The
+            message never repeats ``api_key_env``.
     """
 
     def __init__(
@@ -403,22 +420,25 @@ class OpenAICompatibleCompanion(HttpCompanion):
         self.extra_body = dict(extra_body or {})
         all_headers = dict(headers or {})
         if api_key_env is not None:
-            # The value is never echoed: passed by mistake, it may be the key itself.
-            if not api_key_env.isidentifier():
-                raise ValueError("api_key_env must be the name of an environment variable")
             key = os.environ.get(api_key_env, "").strip()
             if not key:
-                raise ValueError("the environment variable named by api_key_env is not set")
+                # Never echo the value: passed by mistake, it may be the key itself.
+                raise ValueError(
+                    "the environment variable named by api_key_env is not set"
+                    " (pass the variable's name, not the key)"
+                )
             all_headers["Authorization"] = f"Bearer {key}"
-        parts = urllib.parse.urlsplit(base_url)
-        url = parts._replace(path=parts.path.rstrip("/") + "/chat/completions").geturl()
         super().__init__(
-            url,
+            base_url,
             headers=all_headers,
             timeout=timeout,
             request=self._chat_request,
             response=_first_choice,
         )
+
+    def _endpoint(self, parts: SplitResult) -> SplitResult:
+        """``<base_url>/chat/completions``, keeping any query string."""
+        return parts._replace(path=parts.path.rstrip("/") + "/chat/completions")
 
     def _chat_request(self, history: Sequence[ChatMessage]) -> dict[str, Any]:
         system = [ChatMessage("system", self.system_prompt)] if self.system_prompt else []

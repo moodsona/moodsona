@@ -462,12 +462,6 @@ def test_openai_compatible_key_env_is_keyword_only() -> None:
         OpenAICompatibleCompanion("http://127.0.0.1/v1", "m", "s", HIDDEN)  # type: ignore[call-arg]
 
 
-def test_openai_compatible_key_passed_as_env_name_is_not_echoed() -> None:
-    with pytest.raises(ValueError, match="name of an environment variable") as info:
-        OpenAICompatibleCompanion("http://127.0.0.1/v1", "m", "s", api_key_env=HIDDEN)
-    assert HIDDEN not in str(info.value)
-
-
 def test_openai_compatible_keeps_query_string(server: LocalServer) -> None:
     server.answer_json(completion("ok"))
     OpenAICompatibleCompanion(server.url + "/v1/?api-version=2", "m", "s").reply(HISTORY)
