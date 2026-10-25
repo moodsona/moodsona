@@ -52,7 +52,18 @@ or `pip install "moodsona[openai]"`. The core depends only on PyYAML.
 
 ## Quickstart
 
-API as of v0.1; see the docstrings for details.
+Try it from the command line first. This works right after `pip install`,
+offline and without an API key:
+
+```bash
+moodsona smoke anxious-newcomer   # short simulated run of a bundled persona
+moodsona validate                 # check the bundled personas
+```
+
+`smoke` uses a fake model that writes placeholder messages, so it shows that
+the persona loads and its mood moves, not how a real model plays it.
+
+In Python (API as of v0.1; see the docstrings for details):
 
 ```python
 import moodsona
@@ -98,16 +109,19 @@ directly.
 ## CLI
 
 ```bash
-moodsona validate personas/examples/*.yaml   # check persona files
-moodsona smoke personas/examples/boundary-tester.yaml   # short offline run
+moodsona validate                     # all bundled personas
+moodsona validate my-persona.yaml     # your own files or directories
+moodsona smoke boundary-tester        # short offline run of a bundled persona
+moodsona smoke my-persona.yaml --days 2 --turns 4
 ```
 
 `validate` checks persona files against [`personas/schema.json`](personas/schema.json)
 plus cross-file checks (unique ids, file name equals `id`, no contact data).
 `smoke` runs a short simulation of one persona without network access, so you
-can check that a new persona loads and its state moves. Both exit with 0 on
-success, 1 when problems are found or the run fails, and 2 on a usage error.
-Run `moodsona <command> --help` for options.
+can check that a new persona loads and its state moves. Both take file paths
+or the ids of bundled personas (an existing file wins over an id), and both
+exit with 0 on success, 1 when problems are found or the run fails, and 2 on a
+usage error. Run `moodsona <command> --help` for options.
 
 ## Personas
 
