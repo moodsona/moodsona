@@ -10,29 +10,10 @@ place of scenario's own user simulator::
     )
     print(user.metrics(result.messages))
 
-How scenario's conversation maps onto moodsona:
-
-* Every call for a user message is one moodsona turn. The persona's hidden
-  block (inner thought, emotion, energy, intent) stays inside the adapter;
-  scenario only receives the visible message.
-* A moodsona day ends after ``turns_per_day`` turns, or earlier when the
-  persona ends it (``end_day`` / ``skip_tomorrow``). The next call writes the
-  persona's notes about that day and starts the next one, so mood and day
-  memory carry over exactly as in :func:`moodsona.run`. A day the persona
-  skips has no messages and is passed over.
-* The companion's reply to a turn is the text of the ``assistant`` messages
-  that follow the persona's message in ``AgentInput.messages``. System, tool
-  and developer messages, and assistant messages without text (a bare tool
-  call), are not shown to the persona.
-* scenario decides when the conversation stops (``max_turns``, a judge, a
-  script), so the last day's notes are never written.
-* The transcript holds the persona's turns and the replies to them, nothing
-  else. User lines from a scenario script (``scenario.user("...")``) and an
-  opening agent message are shown to the persona as part of the day's
-  conversation but are not in the transcript or the metrics.
-
-The ``scenario`` package is imported only by :func:`user_simulator_agent`;
-importing this module does not need it.
+How scenario's turns map onto moodsona days, and what the transcript holds, is
+described in ``docs/integrations/scenario.md``. The ``scenario`` package is
+imported only by :func:`user_simulator_agent`; importing this module does not
+need it.
 """
 
 from __future__ import annotations
@@ -43,14 +24,14 @@ import importlib
 import random
 import types
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
 
 from moodsona.llm.base import ChatMessage, LLMProvider, Role
 from moodsona.metrics import TranscriptMetrics, compute_metrics
-from moodsona.runner import Transcript, TurnRecord
-from moodsona.simulator import SafetyHook, Simulator, SimulatorConfig, SimulatorTurn
-from moodsona.state import DayNote, Mood, PersonaSeed
+from moodsona.runner import Transcript, TurnRecord, day_is_over, next_active_day
+from moodsona.simulator import SafetyHook, Simulator, SimulatorConfig
+from moodsona.state import PersonaSeed
 
 if TYPE_CHECKING:
     from moodsona.lang.base import LanguageProfile
@@ -71,18 +52,6 @@ _VISIBLE_ROLES: dict[str, Role] = {"user": "user", "assistant": "assistant"}
 
 Message = Mapping[str, Any]
 """One OpenAI-style chat message as scenario passes it (``{"role": ..., "content": ...}``)."""
-
-
-@dataclass(frozen=True, slots=True)
-class _Pending:
-    """The persona's latest turn, waiting for the companion's reply."""
-
-    turn: SimulatorTurn
-    day: int
-    turn_in_day: int
-    mood: Mood
-    #: Position of the persona's message in scenario's message list.
-    index: int
 
 
 def _text(content: Any) -> str:
@@ -169,13 +138,15 @@ class MoodsonaUser:
         )
         self.turns_per_day = turns_per_day
         self.rng_seed = rng_seed
+        self._transcript = Transcript(seed.id, rng_seed, turns_per_day=turns_per_day)
         self._day = 0
         self._turn_in_day = 0
+        #: Position in scenario's message list where today's conversation starts.
         self._day_start = 0
-        self._pending: _Pending | None = None
-        self._turns: list[TurnRecord] = []
-        self._notes: list[DayNote] = []
-        self._skipped: list[int] = []
+        #: The persona's latest turn, its reply still empty, and where its message sits.
+        self._open: TurnRecord | None = None
+        self._open_index = 0
+        self._open_ends_day = False
         #: The scenario thread this persona talks in, once known.
         self._thread_id: str | None = None
         #: Messages the next call's list must at least hold (the persona's last one included).
@@ -206,12 +177,8 @@ class MoodsonaUser:
             ValueError: The agent is already in another scenario run.
             moodsona.llm.LLMError: The provider failed.
         """
-        thread_id = getattr(input, "thread_id", None)
-        return await asyncio.to_thread(
-            self.respond,
-            list(input.messages),
-            thread_id=thread_id if isinstance(thread_id, str) else None,
-        )
+        messages = list(input.messages)
+        return await asyncio.to_thread(self.respond, messages, thread_id=input.thread_id)
 
     def respond(self, messages: Sequence[Message], *, thread_id: str | None = None) -> str:
         """Return the persona's next visible message (the blocking form of :meth:`call`).
@@ -228,27 +195,36 @@ class MoodsonaUser:
             moodsona.llm.LLMError: The provider failed.
         """
         self._check_conversation(messages, thread_id)
-        pending = self._pending
-        if pending is not None:
-            day_over = pending.turn.ends_day or pending.turn_in_day >= self.turns_per_day
-            if day_over:
-                # First: if the notes call fails, the turn stays pending and a retry repeats it.
+        transcript = self._transcript
+        opened = self._open
+        if opened is not None:
+            if self._open_ends_day:
+                # First: if the notes call fails, the turn stays open and a retry repeats it.
                 today = _visible(messages[self._day_start :])
                 note = self.simulator.end_day(today, day=self._day)
                 if note is not None:
-                    self._notes.append(note)
-            self._turns.append(self._record(pending, messages))
-            self._pending = None
-            if day_over:
-                self._start_next_day(len(messages))
+                    transcript.notes.append(note)
+            transcript.turns.append(self._closed(opened, messages))
+            self._open = None
+            if self._open_ends_day:
+                self._start_day(next_active_day(self.simulator, self._day, transcript.skipped_days))
+                self._day_start = len(messages)
         elif self._day == 0:
-            self._start_next_day(0)  # day 1 also shows the persona an opening agent message
+            # Day 1 starts at the top, so the persona also sees an opening agent message.
+            self._start_day(next_active_day(self.simulator, 0, transcript.skipped_days))
+        turn_in_day = self._turn_in_day + 1
         today = _visible(messages[self._day_start :])
-        turn = self.simulator.next_turn(today, day=self._day, turn_in_day=self._turn_in_day + 1)
-        self._turn_in_day += 1
-        self._pending = _Pending(
-            turn, self._day, self._turn_in_day, self.simulator.state.mood, len(messages)
+        turn = self.simulator.next_turn(today, day=self._day, turn_in_day=turn_in_day)
+        self._turn_in_day = turn_in_day
+        self._open = TurnRecord.from_turn(
+            turn,
+            day=self._day,
+            turn_in_day=turn_in_day,
+            companion_reply="",
+            mood=self.simulator.state.mood,
         )
+        self._open_index = len(messages)
+        self._open_ends_day = day_is_over(turn, turn_in_day, self.turns_per_day)
         self._seen = len(messages) + 1
         return turn.text
 
@@ -267,24 +243,14 @@ class MoodsonaUser:
                 "use one agent per scenario run"
             )
 
-    def _start_next_day(self, start: int) -> None:
-        self._day += 1
-        while self.simulator.is_skipped(self._day):
-            self._skipped.append(self._day)
-            self._day += 1
-        self.simulator.start_day(self._day)
+    def _start_day(self, day: int) -> None:
+        self.simulator.start_day(day)
+        self._day = day
         self._turn_in_day = 0
-        self._day_start = start
 
-    @staticmethod
-    def _record(pending: _Pending, messages: Sequence[Message]) -> TurnRecord:
-        return TurnRecord.from_turn(
-            pending.turn,
-            day=pending.day,
-            turn_in_day=pending.turn_in_day,
-            companion_reply=_reply_after(messages, pending.index),
-            mood=pending.mood,
-        )
+    def _closed(self, opened: TurnRecord, messages: Sequence[Message]) -> TurnRecord:
+        """The open turn with the companion's reply from ``messages`` filled in."""
+        return replace(opened, companion_reply=_reply_after(messages, self._open_index))
 
     def transcript(self, messages: Sequence[Message] | None = None) -> Transcript:
         """The run so far, in the form :func:`moodsona.run` returns.
@@ -300,17 +266,16 @@ class MoodsonaUser:
         Returns:
             The transcript. ``days`` is the last day with a turn or a skip.
         """
-        turns = list(self._turns)
-        if self._pending is not None:
-            turns.append(self._record(self._pending, messages or ()))
-        return Transcript(
-            persona_id=self.simulator.seed.id,
-            rng_seed=self.rng_seed,
+        done = self._transcript
+        turns = list(done.turns)
+        if self._open is not None:
+            turns.append(self._closed(self._open, messages or ()))
+        return replace(
+            done,
             turns=turns,
-            notes=list(self._notes),
-            skipped_days=list(self._skipped),
-            days=max([t.day for t in turns] + self._skipped, default=None),
-            turns_per_day=self.turns_per_day,
+            notes=list(done.notes),
+            skipped_days=list(done.skipped_days),
+            days=max([t.day for t in turns] + done.skipped_days, default=None),
         )
 
     def metrics(self, messages: Sequence[Message] | None = None) -> TranscriptMetrics:
@@ -373,26 +338,21 @@ def user_simulator_agent(
 
 
 def _agent_class() -> type[MoodsonaUser]:
-    """The scenario-facing class, built once per ``scenario`` module; imports scenario."""
+    """The scenario-facing class, built once per scenario base class; imports scenario."""
     try:
-        module = importlib.import_module("scenario")
-    except ImportError as exc:
+        # Attribute access on the imported module rather than `from scenario import
+        # ...`: mypy then needs neither scenario's package nor an ignore.
+        scenario = importlib.import_module("scenario")
+        base, role = scenario.AgentAdapter, scenario.AgentRole.USER
+    except (ImportError, AttributeError) as exc:  # AttributeError: an unrelated `scenario`
         raise ImportError(
             f"moodsona's scenario adapter needs langwatch-scenario; {_INSTALL}"
         ) from exc
-    return _build_agent_class(module)
+    return _build_agent_class(base, role)
 
 
 @functools.cache
-def _build_agent_class(module: types.ModuleType) -> type[MoodsonaUser]:
-    base = getattr(module, "AgentAdapter", None)
-    role = getattr(getattr(module, "AgentRole", None), "USER", None)
-    if not isinstance(base, type) or role is None:
-        raise ImportError(
-            f"the installed 'scenario' module is not langwatch-scenario "
-            f"(no AgentAdapter / AgentRole.USER); {_INSTALL}"
-        )
-
+def _build_agent_class(base: type, role: Any) -> type[MoodsonaUser]:
     def body(namespace: dict[str, Any]) -> None:
         namespace["__module__"] = __name__
         namespace["__doc__"] = "A :class:`MoodsonaUser` that scenario runs as its user simulator."

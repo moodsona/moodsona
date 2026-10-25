@@ -274,6 +274,40 @@ def _note_from_dict(data: dict[str, Any]) -> DayNote:
     return DayNote(int(data["day"]), tuple(lines), data["ok"])
 
 
+def next_active_day(
+    simulator: Simulator, after: int, skipped: list[int], *, until: int | None = None
+) -> int:
+    """The first day after ``after`` on which the persona writes.
+
+    Args:
+        simulator: The simulated user.
+        after: The last day so far (0 before the first day).
+        skipped: Days the persona chose not to write; the days passed over are
+            appended to it.
+        until: Do not look past this day (the last day of a run). The result
+            is then larger than ``until`` when no day up to it is left.
+
+    Returns:
+        The day number.
+    """
+    day = after + 1
+    while (until is None or day <= until) and simulator.is_skipped(day):
+        skipped.append(day)
+        day += 1
+    return day
+
+
+def day_is_over(turn: SimulatorTurn, turn_in_day: int, turns_per_day: int) -> bool:
+    """True when the day is over after ``turn``: the persona ended it, or the day is full.
+
+    Args:
+        turn: The persona's latest turn.
+        turn_in_day: Its number within the day, from 1.
+        turns_per_day: Maximum persona messages per day.
+    """
+    return turn.ends_day or turn_in_day >= turns_per_day
+
+
 def run(
     seed: PersonaSeed,
     provider: LLMProvider,
@@ -323,10 +357,8 @@ def run(
         persona_id=seed.id, rng_seed=rng_seed, days=days, turns_per_day=turns_per_day
     )
     history: list[ChatMessage] = []
-    for day in range(1, days + 1):
-        if simulator.is_skipped(day):
-            transcript.skipped_days.append(day)
-            continue
+    day = next_active_day(simulator, 0, transcript.skipped_days, until=days)
+    while day <= days:
         simulator.start_day(day)
         today: list[ChatMessage] = []
         for turn_in_day in range(1, turns_per_day + 1):
@@ -346,9 +378,10 @@ def run(
                     mood=simulator.state.mood,
                 )
             )
-            if turn.ends_day:
+            if day_is_over(turn, turn_in_day, turns_per_day):
                 break
         note = simulator.end_day(today, day=day)
         if note is not None:
             transcript.notes.append(note)
+        day = next_active_day(simulator, day, transcript.skipped_days, until=days)
     return transcript
