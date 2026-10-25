@@ -14,7 +14,7 @@ reacts to your bot's replies according to the persona's rules, remembers earlier
 days, and exports the whole trajectory as JSONL. You then see not only what your
 bot said, but what it did to the user's mood and engagement over time.
 
-Status: alpha (v0.1). English only. The API may change before 1.0.
+Status: alpha (v0.2). English only. The API may change before 1.0.
 
 ## Why not just prompt an LLM to act sad?
 
@@ -40,6 +40,8 @@ those behaviours are reproducible and you can measure them. See
 [docs/METHOD.md](docs/METHOD.md) for the design.
 
 ## Install
+
+Requires Python 3.11 or newer.
 
 ```bash
 pip install moodsona
