@@ -33,7 +33,7 @@ run could make (:func:`moodsona.bench.max_model_calls`).
 
 from __future__ import annotations
 
-import importlib
+import pkgutil
 import re
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
@@ -45,7 +45,7 @@ from moodsona import bench
 from moodsona.companion import Companion
 from moodsona.metrics import compute_metrics
 from moodsona.personas import PersonaError, load_bundled_persona, load_persona
-from moodsona.runner import Transcript, run
+from moodsona.runner import run
 from moodsona.state import PersonaSeed
 from moodsona.validation import YAML_SUFFIXES
 
@@ -76,6 +76,14 @@ _PROMPTFOO_KEYS = frozenset({"workers", "timeout"})
 _INTEGER = re.compile(r"[+-]?[0-9]+")
 
 
+def _fold(key: object) -> str:
+    """``key`` without case and underscores: ``turnsPerDay`` and ``turns_per_day`` match."""
+    return str(key).replace("_", "").lower()
+
+
+_MOODSONA_KEYS_FOLDED = {_fold(key): key for key in DEFAULTS}
+
+
 @dataclass(frozen=True, slots=True)
 class _Settings:
     persona: str
@@ -87,6 +95,7 @@ class _Settings:
     days: int
     turns_per_day: int
     seed: int
+    base_path: str | None  # promptfoo's config folder, which anchors a relative persona path
 
 
 class _ConfigError(Exception):
@@ -119,13 +128,11 @@ def call_api(
         allowed, or the run fails.
     """
     del prompt  # documented as unused
-    config = options.get("config")
     try:
-        settings = _settings(config, (context or {}).get("vars"))
+        settings = _settings(options.get("config"), (context or {}).get("vars"))
         if settings.provider != "fake" and not settings.allow_paid:
             return {"error": _paid_refusal(settings)}  # before any user code or provider
-        base_path = config.get("basePath") if isinstance(config, Mapping) else None
-        persona = _persona(settings.persona, base_path)
+        persona = _persona(settings.persona, settings.base_path)
         companion = _companion(settings.companion, settings.companion_args)
     except (_ConfigError, PersonaError, FileNotFoundError) as exc:
         return {"error": f"moodsona: {exc}"}
@@ -149,7 +156,13 @@ def call_api(
         "days": settings.days,
         "turns_per_day": settings.turns_per_day,
         "seed": settings.seed,
-        **_record(transcript),
+        "transcript": [
+            {"day": t.day, "turn": t.turn, "role": role, "content": content}
+            for t in transcript.turns
+            for role, content in (("user", t.visible), ("assistant", t.companion_reply))
+        ],
+        "trajectory": [asdict(point) for point in transcript.trajectory()],
+        "skipped_days": list(transcript.skipped_days),
         "metrics": compute_metrics(transcript, language=persona.language).to_dict(),
     }
     return {"output": output}
@@ -157,19 +170,6 @@ def call_api(
 
 def _describe(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"
-
-
-def _record(transcript: Transcript) -> dict[str, Any]:
-    messages = [
-        {"day": t.day, "turn": t.turn, "role": role, "content": content}
-        for t in transcript.turns
-        for role, content in (("user", t.visible), ("assistant", t.companion_reply))
-    ]
-    return {
-        "transcript": messages,
-        "trajectory": [asdict(point) for point in transcript.trajectory()],
-        "skipped_days": list(transcript.skipped_days),
-    }
 
 
 def _paid_refusal(settings: _Settings) -> str:
@@ -194,7 +194,8 @@ def _settings(config: object, test_vars: object) -> _Settings:
         meant = _MOODSONA_KEYS_FOLDED.get(_fold(key))
         if meant is not None:
             raise _ConfigError(f"unknown config key {key!r}; did you mean {meant!r}?")
-        if not _is_promptfoo_key(key):
+        promptfoo_key = isinstance(key, str) and (key in _PROMPTFOO_KEYS or key != key.lower())
+        if not promptfoo_key:
             raise _ConfigError(f"unknown config key {key!r}; moodsona keys: {', '.join(DEFAULTS)}")
     for key in test_vars:
         if key in DEFAULTS and key not in RUN_KEYS:
@@ -213,7 +214,7 @@ def _settings(config: object, test_vars: object) -> _Settings:
     allow_paid = raw["allow_paid"]
     if not isinstance(allow_paid, bool):
         raise _ConfigError(f"allow_paid must be true or false, got {allow_paid!r}")
-    model = raw["model"]
+    model, base_path = raw["model"], config.get("basePath")
     return _Settings(
         persona=_string("persona", raw["persona"]),
         companion=_string("companion", raw["companion"]),
@@ -224,19 +225,8 @@ def _settings(config: object, test_vars: object) -> _Settings:
         days=_integer("days", raw["days"], minimum=1),
         turns_per_day=_integer("turns_per_day", raw["turns_per_day"], minimum=1),
         seed=_integer("seed", raw["seed"]),
+        base_path=base_path if isinstance(base_path, str) and base_path else None,
     )
-
-
-def _fold(key: object) -> str:
-    """``key`` without case and underscores: ``turnsPerDay`` and ``turns_per_day`` match."""
-    return str(key).replace("_", "").lower()
-
-
-_MOODSONA_KEYS_FOLDED = {_fold(key): key for key in DEFAULTS}
-
-
-def _is_promptfoo_key(key: object) -> bool:
-    return isinstance(key, str) and (key in _PROMPTFOO_KEYS or key != key.lower())
 
 
 def _string(key: str, value: object) -> str:
@@ -247,18 +237,19 @@ def _string(key: str, value: object) -> str:
 
 def _integer(key: str, value: object, *, minimum: int | None = None) -> int:
     """An int, or a string of one (vars read from a CSV file are strings)."""
-    number = None
-    if isinstance(value, int) and not isinstance(value, bool):
-        number = value
-    elif isinstance(value, str) and _INTEGER.fullmatch(value.strip()):
+    if isinstance(value, str) and _INTEGER.fullmatch(value.strip()):
         number = int(value)
-    if number is None or (minimum is not None and number < minimum):
-        need = "an integer" if minimum is None else f"an integer of at least {minimum}"
-        raise _ConfigError(f"{key} must be {need}, got {value!r}")
-    return number
+    elif isinstance(value, int) and not isinstance(value, bool):
+        number = value
+    else:
+        number = None
+    if number is not None and (minimum is None or number >= minimum):
+        return number
+    need = "an integer" if minimum is None else f"an integer of at least {minimum}"
+    raise _ConfigError(f"{key} must be {need}, got {value!r}")
 
 
-def _persona(value: str, base_path: object) -> PersonaSeed:
+def _persona(value: str, base_path: str | None) -> PersonaSeed:
     """Load a persona file, or a bundled persona when ``value`` is a bare id and no such file.
 
     The rule is the one ``moodsona smoke`` uses. A relative path is read from
@@ -270,33 +261,26 @@ def _persona(value: str, base_path: object) -> PersonaSeed:
         FileNotFoundError: The bundled personas are missing (a broken install).
     """
     path = Path(value)
-    if not path.is_absolute() and isinstance(base_path, str) and base_path:
+    if not path.is_absolute() and base_path:
         path = Path(base_path) / path
     if path.is_file() or Path(value).name != value or path.suffix in YAML_SUFFIXES:
         return load_persona(path)
     try:
         return load_bundled_persona(value)
     except KeyError as exc:  # its message lists the bundled ids
-        raise _ConfigError(str(exc.args[0]) if exc.args else str(exc)) from exc
+        raise _ConfigError(exc.args[0]) from exc
 
 
 def _companion(spec: str, args: Mapping[str, Any]) -> Companion:
     """Import ``"package.module:Name"``, call it with ``args`` and check the result."""
-    module_name, colon, attribute = spec.partition(":")
+    module_name, colon, attribute = spec.partition(":")  # the documented form only
     if not (colon and module_name and attribute):
         raise _ConfigError(f"companion must be an import path 'package.module:Name', got {spec!r}")
     # Importing and constructing run user code, so any exception is reported.
     try:
-        target: Any = importlib.import_module(module_name)
+        target: Any = pkgutil.resolve_name(spec)
     except Exception as exc:
-        raise _ConfigError(f"companion {spec!r}: cannot import {module_name!r}: {exc}") from exc
-    for name in attribute.split("."):
-        try:
-            target = getattr(target, name)
-        except AttributeError as exc:
-            raise _ConfigError(
-                f"companion {spec!r}: {module_name!r} has no attribute {attribute!r}"
-            ) from exc
+        raise _ConfigError(f"companion {spec!r}: cannot import it: {_describe(exc)}") from exc
     if not callable(target):
         raise _ConfigError(f"companion {spec!r} is not callable (use a class or a factory)")
     try:

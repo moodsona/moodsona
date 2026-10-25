@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import operator
 import re
 from pathlib import Path
 from typing import Any
@@ -227,15 +228,15 @@ def test_promptfoo_own_config_keys_are_accepted() -> None:
 
 
 @pytest.mark.parametrize("provider", ["anthropic", "openai"])
+@pytest.mark.parametrize("allow_paid", [{}, {"allow_paid": False}])
 def test_a_paid_provider_is_refused_without_allow_paid(
-    provider: str, monkeypatch: pytest.MonkeyPatch
+    provider: str, allow_paid: dict[str, bool], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _forbid_make_provider(monkeypatch)
-    for config in (_small(provider=provider), _small(provider=provider, allow_paid=False)):
-        message = _error(_call(config))
-        assert "costs money" in message
-        assert "allow_paid: true" in message
-        assert f"up to {bench.max_model_calls(1, 2, 3)} model calls" in message
+    message = _error(_call(_small(provider=provider, **allow_paid)))
+    assert "costs money" in message
+    assert "allow_paid: true" in message
+    assert f"up to {bench.max_model_calls(1, 2, 3)} model calls" in message
 
 
 def test_the_paid_refusal_comes_before_the_companion_is_imported(
@@ -264,16 +265,10 @@ def test_allow_paid_creates_the_named_provider(monkeypatch: pytest.MonkeyPatch) 
     assert output["metrics"]["turns"] == 6
 
 
-def test_a_provider_that_cannot_be_made_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    def missing_sdk(name: str, model: str | None) -> FakeProvider:
-        raise LLMConfigurationError("install moodsona[anthropic]")
-
-    monkeypatch.setattr(bench, "make_provider", missing_sdk)
-    message = _error(_call(_small(provider="anthropic", allow_paid=True)))
-    assert "install moodsona[anthropic]" in message
-
-
-@pytest.mark.parametrize("error", [RuntimeError("no API key set"), KeyError()])
+@pytest.mark.parametrize(
+    "error",
+    [LLMConfigurationError("install moodsona[openai]"), RuntimeError("no API key set"), KeyError()],
+)
 def test_any_exception_while_making_the_provider_is_an_error(
     error: Exception, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -282,7 +277,7 @@ def test_any_exception_while_making_the_provider_is_an_error(
 
     monkeypatch.setattr(bench, "make_provider", failing)
     message = _error(_call(_small(provider="openai", allow_paid=True)))
-    assert type(error).__name__ in message
+    assert f"cannot create provider 'openai': {type(error).__name__}: {error}" in message
 
 
 def test_a_failing_companion_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -311,16 +306,12 @@ def _evaluate(expression: str, output: Any) -> bool:
     """Evaluate the small subset of JavaScript the example's assertions use."""
     match = _ASSERTION.match(expression.strip())
     assert match, f"the example assertion {expression!r} is outside the checked subset"
-    path, operator, literal = match.groups()
+    path, symbol, literal = match.groups()
     value = output
     for name in path.strip(".").split("."):
         value = len(value) if name == "length" and isinstance(value, list) else value[name]
-    expected = json.loads(literal)
-    if operator == "===":
-        return bool(value == expected)
-    if operator == "<=":
-        return bool(value <= expected)
-    return bool(value >= expected)
+    compare = {"===": operator.eq, "<=": operator.le, ">=": operator.ge}[symbol]
+    return bool(compare(value, json.loads(literal)))
 
 
 def test_the_example_config_runs_and_its_assertions_hold() -> None:

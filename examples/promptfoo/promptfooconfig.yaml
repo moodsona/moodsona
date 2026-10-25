@@ -22,7 +22,7 @@ providers:
       persona: anxious-newcomer       # a bundled persona id or a persona YAML path
       companion: moodsona:EchoCompanion  # import path of your companion class
       companion_args:                 # keyword arguments for it
-        prefix: "You said: "
+        prefix: "I hear you: "
       provider: fake                  # fake | anthropic | openai (paid: needs allow_paid)
       days: 2
       turns_per_day: 3
