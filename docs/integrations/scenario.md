@@ -66,7 +66,10 @@ async def test_companion_with_an_anxious_newcomer() -> None:
 - `user.metrics(result.messages)` computes the metrics directly.
 - `user.simulator.state` is the persona's hidden state at any point.
 - Use one agent per `scenario.run`: it carries the persona's state from call to
-  call, so reusing it would continue the same persona's week.
+  call. Passing it to a second run raises a `ValueError` on its first call.
+- The transcript holds the persona's turns and the replies to them. Scripted
+  user lines and an opening agent message are not in it, so its
+  `visible_history()` can be shorter than `result.messages`.
 
 ## Costs and what a fake provider tests
 
@@ -87,6 +90,7 @@ own.
 | assistant messages after the persona's message | the companion's reply |
 | system, tool and developer messages, tool calls without text | not shown to the persona |
 | `max_turns`, the judge or the script | when the run stops; the last day's notes are not written |
+| a scripted user line (`scenario.user("...")`), an opening agent message | shown to the persona as part of the day, not recorded in the transcript |
 
 A day the persona decides to skip (`skip_tomorrow`) has no messages: the
 conversation continues with the day after, and the transcript lists the skipped

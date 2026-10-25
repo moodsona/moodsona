@@ -26,6 +26,10 @@ How scenario's conversation maps onto moodsona:
   call), are not shown to the persona.
 * scenario decides when the conversation stops (``max_turns``, a judge, a
   script), so the last day's notes are never written.
+* The transcript holds the persona's turns and the replies to them, nothing
+  else. User lines from a scenario script (``scenario.user("...")``) and an
+  opening agent message are shown to the persona as part of the day's
+  conversation but are not in the transcript or the metrics.
 
 The ``scenario`` package is imported only by :func:`user_simulator_agent`;
 importing this module does not need it.
@@ -34,6 +38,7 @@ importing this module does not need it.
 from __future__ import annotations
 
 import asyncio
+import functools
 import importlib
 import random
 import types
@@ -56,6 +61,10 @@ __all__ = ["DEFAULT_TURNS_PER_DAY", "MoodsonaUser", "user_simulator_agent"]
 DEFAULT_TURNS_PER_DAY = 4
 
 _INSTALL = "install it with: pip install 'moodsona[scenario]'"
+
+#: Name of the class :func:`user_simulator_agent` builds (an attribute of this
+#: module once scenario is installed).
+_AGENT_CLASS = "MoodsonaUserAgent"
 
 #: OpenAI-style roles shown to the persona, mapped to moodsona's.
 _VISIBLE_ROLES: dict[str, Role] = {"user": "user", "assistant": "assistant"}
@@ -167,6 +176,8 @@ class MoodsonaUser:
         self._turns: list[TurnRecord] = []
         self._notes: list[DayNote] = []
         self._skipped: list[int] = []
+        #: Visible messages the next conversation must at least hold (ours included).
+        self._seen = 0
 
     @property
     def day(self) -> int:
@@ -198,9 +209,16 @@ class MoodsonaUser:
             messages: The conversation so far as OpenAI-style messages.
 
         Raises:
+            ValueError: ``messages`` is shorter than the conversation this
+                persona is already in (the agent was reused for another run).
             moodsona.llm.LLMError: The provider failed.
         """
         history = _visible(messages)
+        if len(history) < self._seen:
+            raise ValueError(
+                "the conversation is shorter than the one this persona is in; "
+                "use one agent per scenario run"
+            )
         pending = self._pending
         if pending is not None:
             day_over = pending.turn.ends_day or pending.turn_in_day >= self.turns_per_day
@@ -222,6 +240,7 @@ class MoodsonaUser:
         self._pending = _Pending(
             turn, self._day, self._turn_in_day, self.simulator.state.mood, len(history)
         )
+        self._seen = len(history) + 1
         return turn.text
 
     def _start_next_day(self, start: int) -> None:
@@ -255,7 +274,7 @@ class MoodsonaUser:
                 persona's last message. Without it that reply is ``""``.
 
         Returns:
-            The transcript. ``days`` is the last day reached.
+            The transcript. ``days`` is the last day with a turn.
         """
         turns = list(self._turns)
         if self._pending is not None:
@@ -266,7 +285,7 @@ class MoodsonaUser:
             turns=turns,
             notes=list(self._notes),
             skipped_days=list(self._skipped),
-            days=self._day or None,
+            days=max((t.day for t in turns), default=None),
             turns_per_day=self.turns_per_day,
         )
 
@@ -305,8 +324,7 @@ def user_simulator_agent(
         ValueError: ``turns_per_day`` is below 1.
         LookupError: No language profile covers the persona's language.
     """
-    agent_class = _agent_class()
-    return agent_class(
+    return _agent_class()(
         seed,
         provider,
         turns_per_day=turns_per_day,
@@ -318,13 +336,18 @@ def user_simulator_agent(
 
 
 def _agent_class() -> type[MoodsonaUser]:
-    """Build the scenario-facing class; imports scenario."""
+    """The scenario-facing class, built once per ``scenario`` module; imports scenario."""
     try:
         module = importlib.import_module("scenario")
     except ImportError as exc:
         raise ImportError(
             f"moodsona's scenario adapter needs langwatch-scenario; {_INSTALL}"
         ) from exc
+    return _build_agent_class(module)
+
+
+@functools.cache
+def _build_agent_class(module: types.ModuleType) -> type[MoodsonaUser]:
     base = getattr(module, "AgentAdapter", None)
     role = getattr(getattr(module, "AgentRole", None), "USER", None)
     if not isinstance(base, type) or role is None:
@@ -338,7 +361,16 @@ def _agent_class() -> type[MoodsonaUser]:
         namespace["__doc__"] = "A :class:`MoodsonaUser` that scenario runs as its user simulator."
         namespace["role"] = role
 
-    return cast(
-        "type[MoodsonaUser]",
-        types.new_class("MoodsonaUserAgent", (MoodsonaUser, base), exec_body=body),
-    )
+    # new_class rather than a class statement: mypy cannot check a base class
+    # that is only known at run time, and this way needs no type: ignore.
+    agent_class = types.new_class(_AGENT_CLASS, (MoodsonaUser, base), exec_body=body)
+    return cast("type[MoodsonaUser]", agent_class)
+
+
+if not TYPE_CHECKING:  # hidden from mypy, so a misspelt import still fails type checking
+
+    def __getattr__(name: str) -> Any:
+        """Resolve ``MoodsonaUserAgent`` on demand, so pickle can find the class."""
+        if name == _AGENT_CLASS:
+            return _agent_class()
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

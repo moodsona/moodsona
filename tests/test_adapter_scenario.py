@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import pickle
 import sys
 import types
 import warnings
@@ -325,6 +326,41 @@ def test_the_transcript_is_empty_before_the_first_call() -> None:
     user = MoodsonaUser(make_seed(), FakeProvider())
     transcript = user.transcript()
     assert (transcript.turns, transcript.days, user.day) == ([], None, 0)
+
+
+def test_reusing_the_agent_for_another_conversation_is_an_error() -> None:
+    user = MoodsonaUser(make_seed(), FakeProvider())
+    first = user.respond([])
+    user.respond([{"role": "user", "content": first}, say("Hm.")])
+    with pytest.raises(ValueError, match="one agent per"):
+        user.respond([])  # a new, shorter conversation
+
+
+def test_days_counts_only_days_with_turns() -> None:
+    calls = 0
+
+    def fails_on_day_2(messages: Sequence[ChatMessage]) -> str:
+        nonlocal calls
+        calls += 1
+        if calls == 3:  # day 2's first turn, after day 1's notes
+            raise LLMError("timeout")
+        return plumbing_reply(messages)
+
+    user = MoodsonaUser(make_seed(), FakeProvider(fails_on_day_2), turns_per_day=1)
+    messages: list[dict[str, Any]] = [{"role": "user", "content": user.respond([])}, say("Hm.")]
+    with pytest.raises(LLMError):
+        user.respond(messages)
+    assert user.transcript(messages).days == 1
+
+
+def test_agents_share_one_class_and_pickle(scenario_module: types.ModuleType) -> None:
+    first = user_simulator_agent(make_seed(), FakeProvider())
+    second = user_simulator_agent(make_seed(), FakeProvider())
+    assert type(first) is type(second)
+    first.respond([])
+    copy = pickle.loads(pickle.dumps(first))  # noqa: S301 - our own bytes, just written
+    assert type(copy) is type(first)
+    assert copy.simulator.state == first.simulator.state
 
 
 def test_turns_per_day_must_be_positive(scenario_module: types.ModuleType) -> None:
