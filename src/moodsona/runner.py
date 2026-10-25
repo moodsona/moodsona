@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from moodsona.companion import Companion
 from moodsona.llm.base import ChatMessage, LLMProvider
-from moodsona.simulator import SafetyHook, Simulator, SimulatorConfig
+from moodsona.simulator import SafetyHook, Simulator, SimulatorConfig, SimulatorTurn
 from moodsona.state import DayNote, Mood, PersonaSeed, Stance
 
 if TYPE_CHECKING:
@@ -69,6 +69,31 @@ class TurnRecord:
             "problems": list(self.problems),
             "forced": self.forced,
         }
+
+    @classmethod
+    def from_turn(
+        cls, turn: SimulatorTurn, *, day: int, turn_in_day: int, companion_reply: str, mood: Mood
+    ) -> TurnRecord:
+        """Record one simulator turn and the companion's answer to it.
+
+        Args:
+            turn: The simulator's turn.
+            day: Day number, from 1.
+            turn_in_day: Turn number within the day, from 1.
+            companion_reply: The companion's answer.
+            mood: The persona's mood after the turn.
+        """
+        return cls(
+            day=day,
+            turn=turn_in_day,
+            hidden=turn.hidden.as_dict() if turn.hidden else None,
+            visible=turn.text,
+            companion_reply=companion_reply,
+            mood=mood,
+            polluted=turn.polluted,
+            problems=turn.problems,
+            forced=turn.forced,
+        )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TurnRecord:
@@ -313,16 +338,12 @@ def run(
             history.append(answer)
             today += [user, answer]
             transcript.turns.append(
-                TurnRecord(
+                TurnRecord.from_turn(
+                    turn,
                     day=day,
-                    turn=turn_in_day,
-                    hidden=turn.hidden.as_dict() if turn.hidden else None,
-                    visible=turn.text,
+                    turn_in_day=turn_in_day,
                     companion_reply=reply,
                     mood=simulator.state.mood,
-                    polluted=turn.polluted,
-                    problems=turn.problems,
-                    forced=turn.forced,
                 )
             )
             if turn.ends_day:

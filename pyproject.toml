@@ -62,6 +62,9 @@ dev = [
   "ruff>=0.17",
   "types-PyYAML>=6.0.12",
 ]
+# Experimental adapter: moodsona as the user simulator of a langwatch/scenario test
+# (moodsona.adapters.scenario). It uses only AgentAdapter, AgentRole.USER and AgentInput.messages.
+scenario = ["langwatch-scenario>=1.6"]
 
 [project.scripts]
 moodsona = "moodsona.cli:main"
