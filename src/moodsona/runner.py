@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 from moodsona.companion import Companion
 from moodsona.llm.base import ChatMessage, LLMProvider
 from moodsona.simulator import SafetyHook, Simulator, SimulatorConfig
-from moodsona.state import DayNote, Mood, PersonaSeed
+from moodsona.state import DayNote, Mood, PersonaSeed, Stance
 
 if TYPE_CHECKING:
     from moodsona.lang.base import LanguageProfile
@@ -69,6 +69,39 @@ class TurnRecord:
             "problems": list(self.problems),
             "forced": self.forced,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TurnRecord:
+        """Rebuild a record from :meth:`as_dict` output.
+
+        Raises:
+            KeyError: A field is missing.
+            ValueError: A field has the wrong type or an out-of-range value.
+        """
+        hidden = data["hidden"]
+        _require(hidden is None or isinstance(hidden, dict), "hidden must be an object or null")
+        if hidden is not None:
+            rules = hidden.get("rules_triggered", [])
+            _require(
+                isinstance(rules, list) and all(map(_is_int, rules)),
+                "hidden.rules_triggered must be a list of integers",
+            )
+        problems, forced = data["problems"], data["forced"]
+        _require(isinstance(data["polluted"], bool), "polluted must be true or false")
+        _require(isinstance(problems, list), "problems must be a list")
+        _require(forced is None or isinstance(forced, str), "forced must be a string or null")
+        state = data["state_after"]
+        return cls(
+            day=int(data["day"]),
+            turn=int(data["turn"]),
+            hidden=hidden,
+            visible=str(data["visible"]),
+            companion_reply=str(data["companion_reply"]),
+            mood=Mood(state["emotion"], state["energy"], Stance(state["stance"])),
+            polluted=data["polluted"],
+            problems=tuple(problems),
+            forced=forced,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +176,77 @@ class Transcript:
         lines += [{"kind": "skipped_day", "day": day} for day in self.skipped_days]
         text = "".join(json.dumps(line, ensure_ascii=False) + "\n" for line in lines)
         Path(path).write_text(text, encoding="utf-8")
+
+    @classmethod
+    def from_jsonl(cls, path: str | PathLike[str]) -> Transcript:
+        """Read a transcript written by :meth:`to_jsonl`.
+
+        Blank lines and lines of an unknown ``kind`` are skipped, so files from
+        newer versions with extra line kinds still load. One file holds one run.
+
+        Args:
+            path: A JSONL file.
+
+        Returns:
+            The transcript.
+
+        Raises:
+            OSError: The file cannot be read.
+            ValueError: The first line is not a ``run`` line, there is a second
+                ``run`` line, or a line is not valid JSON, misses a field or has
+                a field of the wrong type (the message names the line).
+        """
+        transcript: Transcript | None = None
+        text = Path(path).read_text(encoding="utf-8")
+        # Split on "\n" only: to_jsonl keeps characters such as U+2028 unescaped,
+        # and str.splitlines() would break a line inside a JSON string there.
+        for number, line in enumerate(text.split("\n"), start=1):
+            if not line.strip():
+                continue
+            try:
+                data = json.loads(line)
+                _require(isinstance(data, dict), "not a JSON object")
+                kind = data["kind"]
+                if transcript is None:
+                    _require(kind == "run", f"the first line must be a 'run' line, got {kind!r}")
+                    transcript = cls(
+                        persona_id=str(data["persona_id"]),
+                        rng_seed=int(data["rng_seed"]),
+                        days=data.get("days"),
+                        turns_per_day=data.get("turns_per_day"),
+                    )
+                elif kind == "run":
+                    raise ValueError("a second 'run' line; one file holds one run")
+                elif kind == "turn":
+                    transcript.turns.append(TurnRecord.from_dict(data))
+                elif kind == "day_notes":
+                    transcript.notes.append(_note_from_dict(data))
+                elif kind == "skipped_day":
+                    transcript.skipped_days.append(int(data["day"]))
+            except (KeyError, TypeError, ValueError) as exc:  # JSONDecodeError is a ValueError
+                raise ValueError(f"{path}:{number}: {exc}") from exc
+        if transcript is None:
+            raise ValueError(f"{path}: no 'run' line")
+        return transcript
+
+
+def _require(condition: bool, problem: str) -> None:
+    if not condition:
+        raise ValueError(problem)
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _note_from_dict(data: dict[str, Any]) -> DayNote:
+    lines = data["notes"]
+    _require(
+        isinstance(lines, list) and all(isinstance(x, str) for x in lines),
+        "notes must be a list of strings",
+    )
+    _require(isinstance(data["ok"], bool), "ok must be true or false")
+    return DayNote(int(data["day"]), tuple(lines), data["ok"])
 
 
 def run(

@@ -106,6 +106,29 @@ optional typing noise) use the persona's `language` profile by default; pass
 finer control (step by step, custom stopping), use `moodsona.Simulator`
 directly.
 
+## Metrics
+
+```bash
+moodsona report anxious-newcomer.jsonl          # compact table
+moodsona report anxious-newcomer.jsonl --json   # the same numbers as JSON
+```
+
+```python
+from moodsona.metrics import compute_metrics, metrics_from_jsonl
+
+metrics = compute_metrics(transcript)  # or metrics_from_jsonl("anxious-newcomer.jsonl")
+print(metrics.to_dict())
+```
+
+`moodsona.metrics` measures how well the simulated user held its persona in
+one run: emotion and energy (mean, drift per day, volatility), the share of
+turns per intent, how often reaction rules fired, how often the user repeated
+itself, bare agreement and ask-back rates, message length and the share of
+short messages, messages in the wrong language, stance changes per day and
+days skipped. The numbers describe the simulated user, not your bot; compare
+them across user models, personas or seeds. Exact definitions are in the
+module docstring. New in v0.2; names may still change before 1.0.
+
 ## CLI
 
 ```bash

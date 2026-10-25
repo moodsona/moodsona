@@ -7,7 +7,8 @@ name exists (for ``validate``: no file or directory).
 
 Exit codes:
     0: success.
-    1: ``validate`` found problems, or ``smoke`` could not load or run the persona.
+    1: ``validate`` found problems, ``smoke`` could not load or run the persona,
+       or ``report`` could not read the transcript.
     2: usage error (unknown command or bad arguments, printed by argparse; or
        ``validate`` got a missing path or found no persona file to check).
 """
@@ -15,6 +16,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -52,6 +54,11 @@ def _parser() -> argparse.ArgumentParser:
     smoke.add_argument("--days", type=int, default=1, help="simulated days (default: 1)")
     smoke.add_argument("--turns", type=int, default=3, help="turns per day (default: 3)")
     smoke.add_argument("--seed", type=int, default=0, help="random seed (default: 0)")
+    report = commands.add_parser(
+        "report", help="print metrics of a transcript JSONL (how well the persona was held)"
+    )
+    report.add_argument("transcript", help="a file written by Transcript.to_jsonl")
+    report.add_argument("--json", action="store_true", help="print the metrics as JSON")
     return parser
 
 
@@ -118,9 +125,59 @@ def _smoke(args: argparse.Namespace) -> int:
     return 0
 
 
+def _num(value: float | None, spec: str = ".1f") -> str:
+    return "n/a" if value is None else format(value, spec)
+
+
+def _pct(value: float | None) -> str:
+    return _num(value, ".0%")
+
+
+def _report(args: argparse.Namespace) -> int:
+    from moodsona.metrics import metrics_from_jsonl  # only `report` needs it
+
+    try:
+        m = metrics_from_jsonl(args.transcript)
+    except (OSError, ValueError) as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 1
+    if args.json:
+        sys.stdout.write(json.dumps(m.to_dict(), indent=2) + "\n")
+        return 0
+    lines = [
+        f"persona {m.persona_id} (seed {m.rng_seed}): {m.turns} turn(s) on "
+        f"{m.active_days} active day(s), {m.days_skipped} day(s) skipped",
+        f"{'':<15}{'mean':>6}{'drift/day':>11}{'volatility':>12}",
+    ]
+    for name, s in (("emotion", m.emotion), ("energy", m.energy)):
+        lines.append(
+            f"{name:<15}{_num(s.mean):>6}{_num(s.drift_per_day, '+.2f'):>11}"
+            f"{_num(s.volatility):>12}"
+        )
+    intents = ", ".join(f"{k} {_pct(v)}" for k, v in m.intent_shares.items() if v)
+    rules = ", ".join(f"rule {n} x{count}" for n, count in m.rule_counts.items())
+    rows = [
+        ("intents", intents or "n/a"),
+        ("rule triggers", _pct(m.rule_trigger_rate) + (f" ({rules})" if rules else "")),
+        ("own repeats", _pct(m.own_repeat_rate)),
+        ("agreement", _pct(m.agreement_rate)),
+        ("ask-back", _pct(m.ask_back_rate)),
+        ("length", f"{_num(m.mean_message_chars)} chars, {_pct(m.short_message_share)} short"),
+        ("wrong language", _pct(m.wrong_language_share)),
+        ("stance changes", f"{_num(m.stance_changes_per_day, '.2f')} per day"),
+        ("polluted", _pct(m.polluted_share)),
+        ("forced", _pct(m.forced_share)),
+    ]
+    lines += [f"{label:<15}{value}" for label, value in rows]
+    sys.stdout.write("\n".join(lines) + "\n")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the CLI and return its exit code."""
     args = _parser().parse_args(argv)
+    if args.command == "report":
+        return _report(args)
     if args.command == "validate":
         return _validate(args)
     return _smoke(args)
