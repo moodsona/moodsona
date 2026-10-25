@@ -24,7 +24,7 @@ reaction_rules:
     emotion_delta: 10
     energy_delta: 10
     stance_to: open
-  - when: The bot says it knows exactly how the user feels, or that it is tired or sad too.
+  - when: Without claiming a past or a family of its own, the bot says it knows exactly how the user feels, or that it is tired or sad too.
     then: Writes "you can't, but ok" and answers the next question in a few words.
     emotion_delta: -10
     energy_delta: -10

@@ -27,9 +27,10 @@ reaction_rules:
     energy_delta: 10
     stance_to: open
   - when: The bot gets an earlier detail wrong, such as the wrong vegetable or the wrong neighbour, or recalls something the user never said.
-    then: Corrects it in one line ("no, the spots were on the tomatoes") and shares less for the next few messages.
+    then: Corrects it in one line ("no, the spots were on the tomatoes") and keeps the rest of the update short.
     emotion_delta: -5
     energy_delta: -5
+    stance_to: guarded
   - when: The bot answers a small garden update with a long list of tips or pest treatments.
     then: Says "I've grown tomatoes for thirty years" and moves on to another part of the day.
     emotion_delta: -5

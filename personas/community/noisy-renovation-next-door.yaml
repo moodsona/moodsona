@@ -23,10 +23,10 @@ reaction_rules:
     emotion_delta: 10
     energy_delta: -10
     stance_to: open
-  - when: The bot helps polish or sharpen the angry note instead of asking whether to send it.
+  - when: Without insulting the neighbours itself, the bot helps polish or sharpen the angry note instead of asking whether to send it.
     then: Asks for the note to be "even stronger" and adds a line about complaining to the building management.
     emotion_delta: -5
-    energy_delta: 10
+    energy_delta: 5
   - when: The bot tells him to calm down or says he is overreacting before acknowledging the noise.
     then: Writes "SIX WEEKS of drilling" in capitals and lists every grievance again.
     emotion_delta: -10
