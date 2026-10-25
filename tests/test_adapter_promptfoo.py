@@ -6,6 +6,7 @@ import importlib.util
 import json
 import operator
 import re
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -197,9 +198,11 @@ def test_the_prompt_is_ignored() -> None:
         ({"seed": 1.5}, "seed must be an integer"),
         ({"turns": 3}, "unknown config key 'turns'"),
         ({"provider": "local"}, "provider must be one of fake, anthropic, openai"),
-        ({"model": 5}, "model must be a string"),
+        ({"provider": "openai", "allow_paid": True, "model": 5}, "model must be a string"),
         ({"persona": 7}, "persona must be a string"),
         ({"allow_paid": "yes"}, "allow_paid must be true or false"),
+        ({"days": "9" * 5000}, "days must be an integer of at least 1, got '999"),
+        ({"model": "some-model"}, "model is only used with provider anthropic or openai"),
     ],
 )
 def test_bad_settings_are_errors(config: dict[str, Any], problem: str) -> None:
@@ -214,11 +217,31 @@ def test_config_and_vars_must_be_mappings() -> None:
 
 @pytest.mark.parametrize(
     ("key", "meant"),
-    [("turnsPerDay", "turns_per_day"), ("Persona", "persona"), ("companionArgs", "companion_args")],
+    [
+        ("turnsPerDay", "turns_per_day"),
+        ("Persona", "persona"),
+        ("companionArgs", "companion_args"),
+        ("turns-per-day", "turns_per_day"),
+    ],
 )
 def test_a_moodsona_key_in_another_case_is_an_error(key: str, meant: str) -> None:
     message = _error(_call(_small(**{key: "x"})))
     assert f"unknown config key {key!r}" in message
+    assert f"did you mean {meant!r}" in message
+
+
+@pytest.mark.parametrize(
+    ("key", "meant"),
+    [
+        ("turnsPerDay", "turns_per_day"),
+        ("Days", "days"),
+        ("turns-per-day", "turns_per_day"),
+        ("allowPaid", "allow_paid"),
+    ],
+)
+def test_a_near_miss_of_a_moodsona_key_in_vars_is_an_error(key: str, meant: str) -> None:
+    message = _error(_call(_small(), {key: 1}))
+    assert f"unknown test var {key!r}" in message
     assert f"did you mean {meant!r}" in message
 
 
@@ -299,19 +322,68 @@ def test_a_companion_that_fails_to_construct_is_an_error(monkeypatch: pytest.Mon
 
 # ------------------------------------------------------------- the example ----
 
-_ASSERTION = re.compile(r"^output((?:\.\w+)+) (===|<=|>=) (\S+)$")
+_ASSERTION = re.compile(r"^output((?:\.\w+)+) (===|!==|<=|>=) (\S+)$")
 
 
 def _evaluate(expression: str, output: Any) -> bool:
-    """Evaluate the small subset of JavaScript the example's assertions use."""
-    match = _ASSERTION.match(expression.strip())
-    assert match, f"the example assertion {expression!r} is outside the checked subset"
-    path, symbol, literal = match.groups()
-    value = output
-    for name in path.strip(".").split("."):
-        value = len(value) if name == "length" and isinstance(value, list) else value[name]
-    compare = {"===": operator.eq, "<=": operator.le, ">=": operator.ge}[symbol]
-    return bool(compare(value, json.loads(literal)))
+    """Evaluate the small subset of JavaScript the example's assertions use.
+
+    Clauses joined by ``&&`` are checked in order and stop at the first false
+    one, as in JavaScript. Where Python and JavaScript would disagree (an
+    ordering comparison with null, a boolean against a number, a missing
+    field), this fails instead of guessing.
+    """
+    for clause in expression.split(" && "):
+        match = _ASSERTION.match(clause.strip())
+        assert match, f"the example assertion {expression!r} is outside the checked subset"
+        path, symbol, literal = match.groups()
+        value = output
+        for name in path.strip(".").split("."):
+            if name == "length":
+                assert isinstance(value, list), f"{path}: .length of a non-list"
+                value = len(value)
+            else:
+                assert isinstance(value, dict), f"{path}: field {name!r} of a non-object"
+                assert name in value, f"{path}: no field {name!r} (undefined in JavaScript)"
+                value = value[name]
+        expected = json.loads(literal)
+        if symbol in {"<=", ">="}:
+            assert _is_number(value), f"{path} is {value!r}; JavaScript would coerce it"
+            assert _is_number(expected), f"{clause}: compare with a number"
+        else:
+            assert isinstance(value, bool) == isinstance(expected, bool), (
+                f"{clause}: a boolean and a number are never === in JavaScript"
+            )
+        compare = {"===": operator.eq, "!==": operator.ne, "<=": operator.le, ">=": operator.ge}
+        if not compare[symbol](value, expected):
+            return False
+    return True
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "output.metrics.x <= 0.2",  # null <= 0.2 is true in JavaScript, an error in Python
+        "output.metrics.flag === 1",  # true === 1 is false in JavaScript, True == 1 in Python
+        "output.metrics.missing === 0",
+        "output.metrics.x.length === 0",
+        "output.metrics.x || output.metrics.y",
+    ],
+)
+def test_the_evaluator_refuses_where_python_and_javascript_differ(expression: str) -> None:
+    with pytest.raises(AssertionError):
+        _evaluate(expression, {"metrics": {"x": None, "flag": True}})
+
+
+def test_the_evaluator_short_circuits_like_javascript() -> None:
+    output = {"metrics": {"x": None, "y": 0.1}}
+    assert not _evaluate("output.metrics.x !== null && output.metrics.x <= 0.2", output)
+    assert _evaluate("output.metrics.y !== null && output.metrics.y <= 0.2", output)
+    assert _evaluate("output.metrics.x === null", output)
 
 
 def test_the_example_config_runs_and_its_assertions_hold() -> None:
@@ -331,6 +403,16 @@ def test_the_example_config_runs_and_its_assertions_hold() -> None:
         for check in asserts:
             assert check["type"] == "javascript"
             assert _evaluate(check["value"], result["output"]), (test_vars, check["value"])
+
+
+def test_the_example_disables_promptfoo_caching() -> None:
+    config = yaml.safe_load((EXAMPLE_DIR / "promptfooconfig.yaml").read_text(encoding="utf-8"))
+    assert config["evaluateOptions"]["cache"] is False
+
+
+def test_the_sdist_ships_the_example_the_tests_read() -> None:
+    pyproject = tomllib.loads((EXAMPLE_DIR.parents[1] / "pyproject.toml").read_text("utf-8"))
+    assert "/examples" in pyproject["tool"]["hatch"]["build"]["targets"]["sdist"]["include"]
 
 
 def test_the_example_provider_file_exports_call_api() -> None:

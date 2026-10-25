@@ -9,6 +9,11 @@
 
 description: moodsona personas against a companion (offline example)
 
+# promptfoo caches provider responses, and the cache does not notice when
+# your companion's code changes, so a re-run could show an old transcript.
+evaluateOptions:
+  cache: false
+
 # promptfoo needs a prompt. moodsona ignores it (the persona writes the
 # user's lines); it only labels the results table.
 prompts:
@@ -29,14 +34,16 @@ providers:
       seed: 0
 
 # Checked on every test case. `output` is the object the provider returns.
+# A rate is null when there was nothing to count, and `null <= 0.2` is true in
+# JavaScript, so check for null before comparing.
 defaultTest:
   assert:
     - type: javascript
       value: output.metrics.polluted_share === 0
     - type: javascript
-      value: output.metrics.forced_share <= 0.2
+      value: output.metrics.forced_share !== null && output.metrics.forced_share <= 0.2
     - type: javascript
-      value: output.metrics.own_repeat_rate <= 0.2
+      value: output.metrics.own_repeat_rate !== null && output.metrics.own_repeat_rate <= 0.2
 
 tests:
   - description: the default persona

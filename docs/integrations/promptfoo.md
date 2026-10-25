@@ -21,20 +21,22 @@ welcome.
 ## Setup
 
 promptfoo starts a Python process and imports a provider file from it, so that
-Python needs moodsona (and your companion's code) installed. Make an
-environment for it:
+Python needs moodsona (and your companion's code) installed. The adapter is
+not in a release yet: it needs a moodsona release after 0.2.0, or until then
+an install from GitHub. Make an environment for it:
 
 ```bash
-uv venv && uv pip install moodsona       # or: python -m venv .venv && .venv/bin/pip install moodsona
+uv venv && uv pip install "git+https://github.com/moodsona/moodsona"
+# or: python -m venv .venv && .venv/bin/pip install "git+https://github.com/moodsona/moodsona"
 ```
 
 Then either run promptfoo with that environment active, or set
 `pythonExecutable` in the provider config to its interpreter
 (`.venv/bin/python`, on Windows `.venv/Scripts/python.exe`).
 
-promptfoo loads providers from files, so copy the three-line provider file
+promptfoo loads providers from files, so copy the short provider file
 [`examples/promptfoo/provider.py`](../../examples/promptfoo/provider.py) next
-to your `promptfooconfig.yaml`. It only does
+to your `promptfooconfig.yaml`. Apart from its docstring it only does
 `from moodsona.adapters.promptfoo import call_api`.
 
 A complete offline example (the fake user model and the echo companion, free,
@@ -45,6 +47,21 @@ From that folder:
 ```bash
 npx promptfoo@latest eval
 ```
+
+### Turn off promptfoo's cache
+
+promptfoo caches provider responses, and its cache does not notice when your
+companion's code changes: after you edit your bot, a re-run could show the
+old transcript and metrics. The example turns caching off in the config:
+
+```yaml
+evaluateOptions:
+  cache: false
+```
+
+`npx promptfoo@latest eval --no-cache` does the same for one run (the
+`PROMPTFOO_CACHE_ENABLED` environment variable controls it too; see
+promptfoo's caching docs).
 
 ## The provider config
 
@@ -66,7 +83,7 @@ providers:
 | `companion` | `moodsona:EchoCompanion` | Import path `package.module:Name` of the chatbot under test. `Name` is a class or a factory function. |
 | `companion_args` | none | Keyword arguments `Name` is called with. |
 | `provider` | `fake` | The user model that plays the persona: `fake` (offline), `anthropic` or `openai`. |
-| `model` | the adapter's default | Model id for `anthropic` / `openai`. |
+| `model` | the adapter's default | Model id for `anthropic` / `openai`. Setting it with `provider: fake` is an error, so a forgotten `provider` does not run the fake model unnoticed. |
 | `allow_paid` | `false` | Must be `true` for any provider but `fake` (see below). |
 | `days` | `3` | Simulated days. |
 | `turns_per_day` | `6` | Maximum persona messages per day. |
@@ -80,11 +97,11 @@ importable by the Python that promptfoo runs: install your package in that
 environment or put its folder on `PYTHONPATH`.
 
 An unknown key is an error, so a typo does not silently run the default; so
-is a key that differs from one of these only in case or underscores
-(`turnsPerDay`). promptfoo's own keys (`pythonExecutable`, `basePath` and other
-camelCase keys, `workers`, `timeout`) are left to promptfoo. A multi-day run with a real model can take
-longer than promptfoo's default timeout of 5 minutes; raise `timeout`
-(milliseconds) if it does.
+is a key that differs from one of these only in case, underscores or dashes
+(`turnsPerDay`, `turns-per-day`). promptfoo's own keys (`pythonExecutable`,
+`basePath` and other camelCase keys, `workers`, `timeout`) are left to
+promptfoo. A multi-day run with a real model can take longer than promptfoo's
+default timeout of 5 minutes; raise `timeout` (milliseconds) if it does.
 
 ### Test vars and the prompt
 
@@ -99,7 +116,9 @@ tests:
 
 Setting `provider`, `model`, `allow_paid`, `companion` or `companion_args` in
 vars is an error: those belong in the provider config, so that a test case
-cannot switch to a paid model. Other vars are ignored. promptfoo needs a
+cannot switch to a paid model. A var that differs from a moodsona key only in
+case, underscores or dashes (`turnsPerDay`, `Days`) is an error too, with a
+"did you mean" hint. Other vars are ignored. promptfoo needs a
 prompt, but moodsona does not use it (the persona writes the user's lines);
 a prompt such as `"moodsona: {{persona}}"` just labels the results table.
 
@@ -126,7 +145,9 @@ message).
 ## Assertions
 
 In a JavaScript assertion written as an expression, `output` is the object
-above, so fields are plain property access:
+above, so fields are plain property access. A rate in `metrics` is `null`
+when there was nothing to count (no messages, for example), and in JavaScript
+`null <= 0.2` is `true`, so check for `null` before an ordering comparison:
 
 ```yaml
 defaultTest:
@@ -134,14 +155,17 @@ defaultTest:
     - type: javascript
       value: output.metrics.polluted_share === 0
     - type: javascript
-      value: output.metrics.own_repeat_rate <= 0.2
+      value: output.metrics.own_repeat_rate !== null && output.metrics.own_repeat_rate <= 0.2
 tests:
   - vars: {persona: anxious-newcomer}
     assert:
       - type: javascript
         value: output.transcript.length === 12
       - type: javascript
-        value: output.transcript.filter(m => m.role === 'assistant').every(m => m.content.length < 400)
+        value: |
+          return output.transcript
+            .filter(m => m.role === 'assistant')
+            .every(m => m.content.length < 400);
 ```
 
 Keep in mind what the numbers describe: most metrics are about the simulated

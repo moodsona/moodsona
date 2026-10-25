@@ -77,8 +77,8 @@ _INTEGER = re.compile(r"[+-]?[0-9]+")
 
 
 def _fold(key: object) -> str:
-    """``key`` without case and underscores: ``turnsPerDay`` and ``turns_per_day`` match."""
-    return str(key).replace("_", "").lower()
+    """``key`` without case, underscores and dashes: ``turnsPerDay`` matches ``turns_per_day``."""
+    return str(key).replace("_", "").replace("-", "").lower()
 
 
 _MOODSONA_KEYS_FOLDED = {_fold(key): key for key in DEFAULTS}
@@ -157,9 +157,12 @@ def call_api(
         "turns_per_day": settings.turns_per_day,
         "seed": settings.seed,
         "transcript": [
-            {"day": t.day, "turn": t.turn, "role": role, "content": content}
-            for t in transcript.turns
-            for role, content in (("user", t.visible), ("assistant", t.companion_reply))
+            {"day": t.day, "turn": t.turn, "role": m.role, "content": m.content}
+            for t, m in zip(
+                (t for t in transcript.turns for _ in range(2)),  # one user, one assistant
+                transcript.visible_history(),
+                strict=True,
+            )
         ],
         "trajectory": [asdict(point) for point in transcript.trajectory()],
         "skipped_days": list(transcript.skipped_days),
@@ -200,6 +203,9 @@ def _settings(config: object, test_vars: object) -> _Settings:
     for key in test_vars:
         if key in DEFAULTS and key not in RUN_KEYS:
             raise _ConfigError(f"set {key} in the provider config, not in test vars")
+        meant = _MOODSONA_KEYS_FOLDED.get(_fold(key))
+        if key not in DEFAULTS and meant is not None:  # other vars may be for the prompt
+            raise _ConfigError(f"unknown test var {key!r}; did you mean {meant!r}?")
     raw = {**DEFAULTS}
     raw.update((k, v) for k, v in config.items() if k in DEFAULTS)
     raw.update((k, test_vars[k]) for k in RUN_KEYS if k in test_vars)
@@ -215,6 +221,11 @@ def _settings(config: object, test_vars: object) -> _Settings:
     if not isinstance(allow_paid, bool):
         raise _ConfigError(f"allow_paid must be true or false, got {allow_paid!r}")
     model, base_path = raw["model"], config.get("basePath")
+    if model is not None and provider == "fake":
+        raise _ConfigError(
+            f"model is only used with provider anthropic or openai, but provider is fake "
+            f"(got model {model!r}); set provider, or remove model"
+        )
     return _Settings(
         persona=_string("persona", raw["persona"]),
         companion=_string("companion", raw["companion"]),
@@ -238,7 +249,10 @@ def _string(key: str, value: object) -> str:
 def _integer(key: str, value: object, *, minimum: int | None = None) -> int:
     """An int, or a string of one (vars read from a CSV file are strings)."""
     if isinstance(value, str) and _INTEGER.fullmatch(value.strip()):
-        number = int(value)
+        try:
+            number: int | None = int(value)
+        except ValueError:  # more digits than Python converts (sys.get_int_max_str_digits)
+            number = None
     elif isinstance(value, int) and not isinstance(value, bool):
         number = value
     else:
@@ -246,7 +260,7 @@ def _integer(key: str, value: object, *, minimum: int | None = None) -> int:
     if number is not None and (minimum is None or number >= minimum):
         return number
     need = "an integer" if minimum is None else f"an integer of at least {minimum}"
-    raise _ConfigError(f"{key} must be {need}, got {value!r}")
+    raise _ConfigError(f"{key} must be {need}, got {value!r:.40}")
 
 
 def _persona(value: str, base_path: str | None) -> PersonaSeed:
