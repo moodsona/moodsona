@@ -12,10 +12,11 @@ Exit codes:
        could not read the transcript, or ``bench`` failed.
     2: usage error (unknown command or bad arguments, printed by argparse; or
        ``validate`` got a missing path or found no persona file to check; or
-       ``bench`` got an unknown persona; or ``run`` got an unknown companion
-       spec, an unreadable or empty script file, or an ``--out`` it cannot
-       write, or a paid run would overwrite an existing ``--out``; or ``bench``
-       or ``run`` got a paid provider without ``--yes``).
+       ``bench`` got an unknown persona; or ``run`` got ``--model`` with the
+       fake provider, an unknown companion spec, an unreadable or empty script
+       file, an ``--out`` it cannot write, or an existing ``--out`` without
+       ``--force``; or ``bench`` or ``run`` got a paid provider without
+       ``--yes``).
 """
 
 from __future__ import annotations
@@ -23,7 +24,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TextIO
@@ -104,7 +104,10 @@ def _parser() -> argparse.ArgumentParser:
     run_cmd.add_argument(
         "--out",
         default="run.jsonl",
-        help="transcript JSONL to write; a paid run never overwrites one (default: run.jsonl)",
+        help="transcript JSONL to write, never an existing file (default: run.jsonl)",
+    )
+    run_cmd.add_argument(
+        "--force", action="store_true", help="replace --out if it exists (after a finished run)"
     )
     run_cmd.add_argument(
         "--yes", action="store_true", help="confirm that a paid provider may be called"
@@ -226,7 +229,7 @@ def _read_script(path: str) -> list[str]:
         ValueError: The file cannot be read, is not UTF-8, or has no replies.
     """
     try:
-        text = Path(path).read_text(encoding="utf-8")
+        text = Path(path).read_text(encoding="utf-8-sig")  # -sig: drop a byte order mark
     except (OSError, UnicodeDecodeError) as exc:
         raise ValueError(f"cannot read the script file {path}: {exc}") from exc
     # read_text turns \r\n into \n; split on it only, so a reply stays one line.
@@ -263,20 +266,37 @@ def _refuse_paid(provider: str, yes: bool, personas: int, days: int, turns: int)
     return True
 
 
-def _check_out(path: Path, *, paid: bool) -> str | None:
+def _check_out(path: Path, *, force: bool) -> str | None:
     """The problem with ``--out`` that can be seen without writing anything, or None."""
     if path.is_dir():
         return f"--out {path}: is a directory"
-    if paid and path.exists():
-        return (
-            f"--out {path}: already exists, and a paid run does not overwrite it; "
-            "choose another --out or remove the file"
-        )
+    if path.exists() and not force:
+        return f"--out {path}: already exists; choose another --out, or add --force to replace it"
     return None
+
+
+def _claim_out(path: Path, *, force: bool) -> bool:
+    """Create ``path`` (empty) so the run's transcript can be written; True if it was new.
+
+    Without ``force`` the file is created exclusively, so a second run with the
+    same ``--out`` cannot start; with ``force`` an existing file is opened for
+    appending, which checks it can be written without emptying it yet.
+
+    Raises:
+        OSError: The file exists (without ``force``) or cannot be written.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    new = not path.exists()
+    with path.open("a" if force else "x", encoding="utf-8"):
+        pass
+    return new
 
 
 def _run(args: argparse.Namespace) -> int:
     err, out = sys.stderr, sys.stdout
+    if args.model and args.provider == "fake":
+        err.write("--model needs --provider anthropic or --provider openai\n")
+        return 2
     seed = _load_cli_persona(args.persona)
     if seed is None:
         return 1
@@ -286,26 +306,29 @@ def _run(args: argparse.Namespace) -> int:
         err.write(f"--companion: {exc}\n")
         return 2
     target = Path(args.out)
-    problem = _check_out(target, paid=args.provider != "fake")
+    problem = _check_out(target, force=args.force)
     if problem:
         err.write(f"{problem}\n")
         return 2
     if _refuse_paid(args.provider, args.yes, 1, args.days, args.turns):
         return 2
-    try:  # make sure the transcript can be written before the first (maybe paid) call
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryFile(dir=target.parent):
-            pass
+    try:  # before the first (maybe paid) call, so the transcript can always be written
+        new = _claim_out(target, force=args.force)
     except OSError as exc:
         err.write(f"--out {target}: cannot write there: {exc}\n")
         return 2
+    done = False
     try:
         provider = bench.make_provider(args.provider, args.model)
         transcript = run(seed, provider, companion, args.days, args.turns, args.seed)
         transcript.to_jsonl(target)
+        done = True
     except (LookupError, LLMError, OSError) as exc:  # LLMError: e.g. the SDK is not installed
         err.write(f"{exc}\n")
         return 1
+    finally:
+        if new and not done:  # also on Ctrl-C: leave no empty file that blocks a rerun
+            target.unlink(missing_ok=True)
     label = bench.model_label(args.provider, provider)
     out.write(
         f"persona {seed.id}: {len(transcript.turns)} turn(s), "

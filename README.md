@@ -184,9 +184,11 @@ can check that a new persona loads and its state moves.
 companion is `echo` (repeats the user, the default) or `script:<file>` (a
 UTF-8 file with one reply per line, blank lines skipped, used in order and
 then from the start again). The default user model is the offline fake one.
+`run` does not replace an existing `--out` unless you add `--force`, and it
+checks the persona, the companion and `--out` before the first model call.
 With `--provider anthropic` or `--provider openai` the run **costs money**: it
 refuses to start without `--yes` and prints the worst-case number of model
-calls first, and it never overwrites an existing `--out`:
+calls first:
 
 ```bash
 pip install "moodsona[anthropic]"          # or moodsona[openai]

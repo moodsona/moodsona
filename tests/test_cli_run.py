@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import stat
 from pathlib import Path
 
 import pytest
@@ -68,7 +69,8 @@ def test_run_with_a_script_companion_cycles_and_skips_blank_lines(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     script = tmp_path / "bot.txt"
-    script.write_bytes(b"First reply.\n\n   \nSecond reply.\r\n")
+    # A byte order mark (some Windows editors write one) is not part of the first reply.
+    script.write_bytes(b"\xef\xbb\xbfFirst reply.\n\n   \nSecond reply.\r\n")
     out = tmp_path / "run.jsonl"
     args = _run(str(EXAMPLE), "--companion", f"script:{script}", "--days", "1", "--turns", "5")
     assert main([*args, "--out", str(out)]) == 0
@@ -173,13 +175,83 @@ def test_an_unwritable_out_is_a_usage_error_before_any_model_call(
     assert "cannot write" in capsys.readouterr().err
 
 
-def test_a_fake_run_overwrites_an_existing_out(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+def test_an_existing_out_is_kept_unless_forced(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     out = tmp_path / "run.jsonl"
-    out.write_text("old\n", encoding="utf-8")
-    assert main(_run(str(EXAMPLE), "--turns", "1", "--days", "1", "--out", str(out))) == 0
+    out.write_text("an earlier (maybe paid) run\n", encoding="utf-8")
+    short = ["--turns", "1", "--days", "1", "--out", str(out)]
+    _forbid_make_provider(monkeypatch)
+    assert main(_run(str(EXAMPLE), *short)) == 2  # a fake run too
+    assert "already exists" in capsys.readouterr().err
+    assert out.read_text(encoding="utf-8") == "an earlier (maybe paid) run\n"
+    monkeypatch.undo()
+    assert main(_run(str(EXAMPLE), *short, "--force")) == 0
     assert Transcript.from_jsonl(out).persona_id == "anxious-newcomer"
+
+
+def test_out_never_replaces_the_input_files(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _forbid_make_provider(monkeypatch)
+    persona = tmp_path / "anxious-newcomer.yaml"
+    persona.write_bytes(EXAMPLE.read_bytes())
+    script = tmp_path / "replies.txt"
+    script.write_text("Hello.\n", encoding="utf-8")
+    assert main(_run(str(persona), "--out", str(persona))) == 2
+    assert main(_run(str(persona), "--companion", f"script:{script}", "--out", str(script))) == 2
+    assert persona.read_bytes() == EXAMPLE.read_bytes()
+    assert script.read_text(encoding="utf-8") == "Hello.\n"
+
+
+def test_out_is_claimed_before_the_first_model_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out = tmp_path / "run.jsonl"
+    seen: list[bool] = []
+
+    def factory(name: str, model: str | None) -> FakeProvider:
+        seen.append(out.is_file())  # so a second run with the same --out cannot start
+        return FakeProvider()
+
+    monkeypatch.setattr(bench, "make_provider", factory)
+    assert main(_run(str(EXAMPLE), "--days", "1", "--turns", "1", "--out", str(out))) == 0
+    assert seen == [True]
+
+
+def test_a_forced_out_that_cannot_be_written_fails_before_any_model_call(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _forbid_make_provider(monkeypatch)
+    out = tmp_path / "read-only.jsonl"
+    out.write_text("keep\n", encoding="utf-8")
+    out.chmod(stat.S_IREAD)
+    try:
+        assert main(_run(str(EXAMPLE), "--force", "--out", str(out))) == 2
+    finally:
+        out.chmod(stat.S_IREAD | stat.S_IWRITE)
+    assert "cannot write" in capsys.readouterr().err
+    assert out.read_text(encoding="utf-8") == "keep\n"
+
+
+def test_a_failed_forced_run_keeps_the_old_out(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(bench, "make_provider", lambda name, model: FakeProvider([]))
+    out = tmp_path / "run.jsonl"
+    out.write_text("keep\n", encoding="utf-8")
+    assert main(_run(str(EXAMPLE), "--force", "--out", str(out))) == 1
+    assert out.read_text(encoding="utf-8") == "keep\n"
+
+
+def test_model_without_a_real_provider_is_a_usage_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _forbid_make_provider(monkeypatch)
+    out = tmp_path / "run.jsonl"
+    assert main(_run(str(EXAMPLE), "--model", "some-model", "--yes", "--out", str(out))) == 2
+    assert "--model needs --provider" in capsys.readouterr().err
+    assert not out.exists()
 
 
 @pytest.mark.parametrize("provider", ["anthropic", "openai"])
