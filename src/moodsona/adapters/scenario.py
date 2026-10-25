@@ -81,7 +81,7 @@ class _Pending:
     day: int
     turn_in_day: int
     mood: Mood
-    #: Position of the persona's message in the visible conversation.
+    #: Position of the persona's message in scenario's message list.
     index: int
 
 
@@ -108,10 +108,10 @@ def _visible(messages: Sequence[Message]) -> list[ChatMessage]:
     return visible
 
 
-def _reply_after(history: Sequence[ChatMessage], index: int) -> str:
-    """The companion's messages after position ``index``, up to the next user message."""
+def _reply_after(messages: Sequence[Message], index: int) -> str:
+    """The companion's text after position ``index``, up to the next user message."""
     lines: list[str] = []
-    for message in history[index + 1 :]:
+    for message in _visible(messages[index + 1 :]):
         if message.role == "user":
             break
         lines.append(message.content)
@@ -176,7 +176,9 @@ class MoodsonaUser:
         self._turns: list[TurnRecord] = []
         self._notes: list[DayNote] = []
         self._skipped: list[int] = []
-        #: Visible messages the next conversation must at least hold (ours included).
+        #: The scenario thread this persona talks in, once known.
+        self._thread_id: str | None = None
+        #: Messages the next call's list must at least hold (the persona's last one included).
         self._seen = 0
 
     @property
@@ -187,61 +189,83 @@ class MoodsonaUser:
     async def call(self, input: Any) -> str:
         """Return the persona's next visible message (scenario's entry point).
 
-        The simulator's model calls are blocking; they run in a worker thread
-        so the event loop stays free.
+        The simulator's model calls are blocking; they run in a worker thread,
+        on a copy of the messages, so the event loop stays free. Cancelling the
+        call (a scenario timeout, for example) does not stop a model call that
+        has already started; the thread finishes it in the background.
 
         Args:
             input: scenario's ``AgentInput``. Only ``input.messages``, the
-                conversation so far as OpenAI-style messages, is read.
+                conversation so far as OpenAI-style messages, and
+                ``input.thread_id`` are read.
 
         Returns:
             The message text; scenario adds it to the conversation as a user message.
 
         Raises:
+            ValueError: The agent is already in another scenario run.
             moodsona.llm.LLMError: The provider failed.
         """
-        return await asyncio.to_thread(self.respond, input.messages)
+        thread_id = getattr(input, "thread_id", None)
+        return await asyncio.to_thread(
+            self.respond,
+            list(input.messages),
+            thread_id=thread_id if isinstance(thread_id, str) else None,
+        )
 
-    def respond(self, messages: Sequence[Message]) -> str:
+    def respond(self, messages: Sequence[Message], *, thread_id: str | None = None) -> str:
         """Return the persona's next visible message (the blocking form of :meth:`call`).
 
         Args:
             messages: The conversation so far as OpenAI-style messages.
+            thread_id: scenario's id of the conversation. The first one seen
+                binds the agent to that conversation. Without it, a message
+                list shorter than the last one is taken as another conversation.
 
         Raises:
-            ValueError: ``messages`` is shorter than the conversation this
-                persona is already in (the agent was reused for another run).
+            ValueError: The messages belong to another conversation than the
+                one this persona is in (the agent was reused for another run).
             moodsona.llm.LLMError: The provider failed.
         """
-        history = _visible(messages)
-        if len(history) < self._seen:
-            raise ValueError(
-                "the conversation is shorter than the one this persona is in; "
-                "use one agent per scenario run"
-            )
+        self._check_conversation(messages, thread_id)
         pending = self._pending
         if pending is not None:
             day_over = pending.turn.ends_day or pending.turn_in_day >= self.turns_per_day
             if day_over:
                 # First: if the notes call fails, the turn stays pending and a retry repeats it.
-                note = self.simulator.end_day(history[self._day_start :], day=self._day)
+                today = _visible(messages[self._day_start :])
+                note = self.simulator.end_day(today, day=self._day)
                 if note is not None:
                     self._notes.append(note)
-            self._turns.append(self._record(pending, history))
+            self._turns.append(self._record(pending, messages))
             self._pending = None
             if day_over:
-                self._start_next_day(len(history))
+                self._start_next_day(len(messages))
         elif self._day == 0:
             self._start_next_day(0)  # day 1 also shows the persona an opening agent message
-        turn = self.simulator.next_turn(
-            history[self._day_start :], day=self._day, turn_in_day=self._turn_in_day + 1
-        )
+        today = _visible(messages[self._day_start :])
+        turn = self.simulator.next_turn(today, day=self._day, turn_in_day=self._turn_in_day + 1)
         self._turn_in_day += 1
         self._pending = _Pending(
-            turn, self._day, self._turn_in_day, self.simulator.state.mood, len(history)
+            turn, self._day, self._turn_in_day, self.simulator.state.mood, len(messages)
         )
-        self._seen = len(history) + 1
+        self._seen = len(messages) + 1
         return turn.text
+
+    def _check_conversation(self, messages: Sequence[Message], thread_id: str | None) -> None:
+        if thread_id is None:
+            if len(messages) < self._seen:
+                raise ValueError(
+                    "the conversation is shorter than the one this persona is in; "
+                    "use one agent per scenario run"
+                )
+        elif self._thread_id is None:
+            self._thread_id = thread_id
+        elif thread_id != self._thread_id:
+            raise ValueError(
+                f"this persona is in scenario thread {self._thread_id!r}, not {thread_id!r}; "
+                "use one agent per scenario run"
+            )
 
     def _start_next_day(self, start: int) -> None:
         self._day += 1
@@ -253,12 +277,12 @@ class MoodsonaUser:
         self._day_start = start
 
     @staticmethod
-    def _record(pending: _Pending, history: Sequence[ChatMessage]) -> TurnRecord:
+    def _record(pending: _Pending, messages: Sequence[Message]) -> TurnRecord:
         return TurnRecord.from_turn(
             pending.turn,
             day=pending.day,
             turn_in_day=pending.turn_in_day,
-            companion_reply=_reply_after(history, pending.index),
+            companion_reply=_reply_after(messages, pending.index),
             mood=pending.mood,
         )
 
@@ -274,18 +298,18 @@ class MoodsonaUser:
                 persona's last message. Without it that reply is ``""``.
 
         Returns:
-            The transcript. ``days`` is the last day with a turn.
+            The transcript. ``days`` is the last day with a turn or a skip.
         """
         turns = list(self._turns)
         if self._pending is not None:
-            turns.append(self._record(self._pending, _visible(messages or ())))
+            turns.append(self._record(self._pending, messages or ()))
         return Transcript(
             persona_id=self.simulator.seed.id,
             rng_seed=self.rng_seed,
             turns=turns,
             notes=list(self._notes),
             skipped_days=list(self._skipped),
-            days=max((t.day for t in turns), default=None),
+            days=max([t.day for t in turns] + self._skipped, default=None),
             turns_per_day=self.turns_per_day,
         )
 
@@ -294,6 +318,10 @@ class MoodsonaUser:
 
         Args:
             messages: See :meth:`transcript`.
+
+        Returns:
+            The metrics. The agreement, ask-back and wrong-language rates use
+            the simulator's language profile (None when language checks are off).
         """
         return compute_metrics(self.transcript(messages), language=self.simulator.language)
 
@@ -312,8 +340,17 @@ def user_simulator_agent(
 
     Pass it to ``scenario.run(agents=[...])`` instead of scenario's
     ``UserSimulatorAgent``. Use one agent per scenario run: it keeps the
-    persona's state from call to call. The arguments are those of
-    :class:`MoodsonaUser`.
+    persona's state from call to call.
+
+    Args:
+        seed: The persona.
+        provider: The model that writes the persona's lines.
+        turns_per_day: Maximum persona messages per moodsona day.
+        rng_seed: Seed for overnight energy and typing noise.
+        language: Language profile; None (the default) uses the persona's
+            ``language`` (see :class:`~moodsona.simulator.Simulator`).
+        safety_hook: Optional crisis detector (see :class:`~moodsona.simulator.Simulator`).
+        config: Optional simulator settings.
 
     Returns:
         An instance of a subclass of both :class:`MoodsonaUser` and
@@ -372,5 +409,9 @@ if not TYPE_CHECKING:  # hidden from mypy, so a misspelt import still fails type
     def __getattr__(name: str) -> Any:
         """Resolve ``MoodsonaUserAgent`` on demand, so pickle can find the class."""
         if name == _AGENT_CLASS:
-            return _agent_class()
+            try:
+                return _agent_class()
+            except ImportError as exc:
+                message = f"{__name__}.{name} needs langwatch-scenario; {_INSTALL}"
+                raise AttributeError(message) from exc
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

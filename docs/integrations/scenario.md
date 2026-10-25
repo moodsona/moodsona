@@ -63,10 +63,16 @@ async def test_companion_with_an_anxious_newcomer() -> None:
   shape `moodsona.run` returns, so `moodsona report` and `moodsona.metrics`
   work on it. Pass `result.messages` so the agent's last reply is recorded;
   without it that reply is empty.
-- `user.metrics(result.messages)` computes the metrics directly.
+- `user.metrics(result.messages)` computes the metrics directly. It uses the
+  persona's language profile; `moodsona report` uses English. For every
+  bundled persona the two are the same.
 - `user.simulator.state` is the persona's hidden state at any point.
 - Use one agent per `scenario.run`: it carries the persona's state from call to
-  call. Passing it to a second run raises a `ValueError` on its first call.
+  call. The first call binds it to scenario's `thread_id`; a call from another
+  thread raises a `ValueError`. (Without a `thread_id`, a message list shorter
+  than the previous one raises it.)
+- A call that scenario cancels (a timeout, for example) does not stop a model
+  call that has already started; the worker thread finishes it.
 - The transcript holds the persona's turns and the replies to them. Scripted
   user lines and an opening agent message are not in it, so its
   `visible_history()` can be shorter than `result.messages`.

@@ -26,12 +26,14 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+import moodsona.adapters
 from moodsona.adapters.scenario import MoodsonaUser, user_simulator_agent
 from moodsona.llm.base import ChatMessage, LLMError
 from moodsona.llm.fake import FakeProvider, plumbing_reply
 from moodsona.metrics import metrics_from_jsonl
 from moodsona.prompts import NOTES_MARKER
 from moodsona.runner import Transcript
+from moodsona.simulator import SimulatorConfig
 from support import block, make_seed
 
 # -- a minimal stand-in for the scenario package ---------------------------
@@ -74,7 +76,9 @@ def scenario_module(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
         with warnings.catch_warnings():  # its import-time deprecation warnings are not ours
             warnings.simplefilter("ignore")
             real = importlib.import_module("scenario")
-    except ModuleNotFoundError:
+    except ModuleNotFoundError as exc:
+        if exc.name != "scenario":
+            raise  # scenario is installed but one of its own imports is missing
         stub = make_stub()
         monkeypatch.setitem(sys.modules, "scenario", stub)
         return stub
@@ -336,6 +340,88 @@ def test_reusing_the_agent_for_another_conversation_is_an_error() -> None:
         user.respond([])  # a new, shorter conversation
 
 
+def test_the_agent_is_bound_to_one_scenario_thread(scenario_module: types.ModuleType) -> None:
+    user = user_simulator_agent(make_seed(), FakeProvider())
+
+    def ask(thread_id: str, messages: list[dict[str, Any]]) -> str:
+        agent_input = scenario_module.AgentInput(
+            thread_id=thread_id, messages=messages, new_messages=[], scenario_state=None
+        )
+        return asyncio.run(user.call(agent_input))
+
+    first = ask("run-1", [])
+    so_far = [{"role": "user", "content": first}, say("Hm.")]
+    ask("run-1", so_far)
+    longer = [*so_far, {"role": "user", "content": "x"}, say("y")]
+    with pytest.raises(ValueError, match="thread"):
+        ask("run-2", longer)  # longer than before, but another conversation
+
+
+def test_a_blank_persona_message_keeps_the_conversation_in_step() -> None:
+    # Every attempt fails to parse, so each turn falls back to an empty line.
+    config = SimulatorConfig(fallback_message="")
+    user = MoodsonaUser(make_seed(), FakeProvider(lambda _: "not a turn"), config=config)
+    messages: list[dict[str, Any]] = []
+    replies = ("Hello?", "Are you there?", "Take your time.")
+    for reply in replies:
+        messages += [{"role": "user", "content": user.respond(messages)}, say(reply)]
+    turns = user.transcript(messages).turns
+    assert [t.companion_reply for t in turns] == list(replies)
+    assert all(t.polluted and t.visible == "" for t in turns)
+
+
+def test_call_hands_respond_a_snapshot_of_the_messages(
+    scenario_module: types.ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = user_simulator_agent(make_seed(), FakeProvider())
+    seen: list[Sequence[Any]] = []
+
+    def fake_respond(messages: Sequence[Any], *, thread_id: str | None = None) -> str:
+        seen.append(messages)
+        return "hi"
+
+    monkeypatch.setattr(user, "respond", fake_respond)
+    agent_input = scenario_module.AgentInput(
+        thread_id="t", messages=[say("Hello")], new_messages=[], scenario_state=None
+    )
+    asyncio.run(user.call(agent_input))
+    assert seen == [agent_input.messages]
+    assert seen[0] is not agent_input.messages
+
+
+def test_days_covers_skipped_days() -> None:
+    turns = 0
+
+    def skip_then_fail(messages: Sequence[ChatMessage]) -> str:
+        nonlocal turns
+        if messages[0].content.startswith(NOTES_MARKER):
+            return plumbing_reply(messages)
+        turns += 1
+        if turns > 1:  # the first turn after the skipped day
+            raise LLMError("timeout")
+        return block("see you in two days", intent="skip_tomorrow")
+
+    user = MoodsonaUser(make_seed(), FakeProvider(skip_then_fail), turns_per_day=3)
+    messages: list[dict[str, Any]] = [{"role": "user", "content": user.respond([])}, say("Bye!")]
+    with pytest.raises(LLMError):
+        user.respond(messages)
+    transcript = user.transcript(messages)
+    assert (transcript.skipped_days, transcript.days) == ([2], 2)
+
+
+def test_the_agent_class_attribute_needs_scenario(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "scenario", None)  # blocks `import scenario`
+    adapter = moodsona.adapters.scenario
+    name = "MoodsonaUserAgent"
+    assert not hasattr(adapter, name)
+    with pytest.raises(AttributeError, match=r"moodsona\[scenario\]") as info:
+        getattr(adapter, name)
+    assert isinstance(info.value.__cause__, ImportError)
+    missing = "NoSuchName"
+    with pytest.raises(AttributeError, match="no attribute"):
+        getattr(adapter, missing)
+
+
 def test_days_counts_only_days_with_turns() -> None:
     calls = 0
 
@@ -372,6 +458,8 @@ def test_module_imports_without_scenario_and_names_the_extra(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(sys.modules, "scenario", None)  # blocks `import scenario`
+    # Re-importing rebinds the package attribute too; have monkeypatch restore both.
+    monkeypatch.setattr(moodsona.adapters, "scenario", sys.modules["moodsona.adapters.scenario"])
     monkeypatch.delitem(sys.modules, "moodsona.adapters.scenario")
     adapter = importlib.import_module("moodsona.adapters.scenario")
     with pytest.raises(ImportError, match=r"moodsona\[scenario\]"):
