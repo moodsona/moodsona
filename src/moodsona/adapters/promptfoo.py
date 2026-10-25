@@ -1,72 +1,49 @@
 """promptfoo provider: one promptfoo test case is one multi-day moodsona run.
 
-`promptfoo <https://www.promptfoo.dev>`_ is a Node.js evaluation tool. It loads
-a Python provider from a file (``id: file://provider.py``) and calls its
-``call_api(prompt, options, context)`` once per test case. Point it at a file
-that re-exports :func:`call_api` (``examples/promptfoo/provider.py`` in the
-repository). promptfoo does not need to be installed for this module; nothing
-here imports it. Experimental: the config keys and the output may still change.
-
-Settings come from the provider's ``config`` (see :data:`DEFAULTS` for the keys
-and their defaults). A test case's ``vars`` may override the run settings in
-:data:`RUN_KEYS` (persona, days, turns per day, seed), so one provider can run
-several personas. The provider, model, ``allow_paid`` and the companion can
-only be set in the provider config, so a test case cannot switch to a paid
-model. A key or var that differs from a moodsona key only in case, underscores
-or dashes (``turnsPerDay``) is an error. Other vars are ignored (they may be
-meant for the prompt), and so is the prompt itself: the persona writes the
-user's lines.
-
-The companion under test is named by an import path, ``"package.module:Name"``.
-``Name`` (a class or a factory function) is called with ``companion_args`` as
-keyword arguments, and must return an object with a ``reply(history)`` method
-(see :class:`moodsona.Companion`). The module must be importable by the Python
-that promptfoo runs.
-
-The output is a JSON-ready dict: the visible transcript, the trajectory, the
-skipped days and ``metrics`` (the dict that ``moodsona report --json`` prints).
-Every problem is returned as promptfoo's ``{"error": "..."}`` instead of being
-raised, including exceptions from the companion.
-
-A provider other than ``"fake"`` calls a paid API. It is refused unless the
-config sets ``allow_paid: true``; the refusal names the most model calls the
-run could make (:func:`moodsona.bench.max_model_calls`).
+Point promptfoo at a file that re-exports :func:`call_api`
+(``examples/promptfoo/provider.py``). The provider config names the persona,
+the companion under test (an import path) and the user model; the output is the
+transcript plus the ``moodsona report --json`` metrics, and every problem comes
+back as ``{"error": ...}``. A paid user model needs ``allow_paid: true``.
+Experimental. See docs/integrations/promptfoo.md for the config keys, the
+output and examples.
 """
 
 from __future__ import annotations
 
 import pkgutil
-import re
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass
-from pathlib import Path
+from dataclasses import asdict, dataclass, fields
 from types import MappingProxyType
 from typing import Any
 
 from moodsona import bench
 from moodsona.companion import Companion
 from moodsona.metrics import compute_metrics
-from moodsona.personas import PersonaError, load_bundled_persona, load_persona
+from moodsona.personas import PersonaError, load_persona, resolve_persona_path
 from moodsona.runner import run
 from moodsona.state import PersonaSeed
-from moodsona.validation import YAML_SUFFIXES
 
 __all__ = ["DEFAULTS", "RUN_KEYS", "call_api"]
 
+
+@dataclass(frozen=True, slots=True)
+class _Settings:
+    """The provider config keys, with their defaults."""
+
+    persona: str = "anxious-newcomer"  # a bundled persona id or a persona YAML path
+    companion: str = "moodsona:EchoCompanion"  # import path of the companion under test
+    companion_args: Mapping[str, Any] | None = None  # keyword arguments for the companion
+    provider: str = "fake"  # the user model: one of moodsona.bench.PROVIDERS
+    model: str | None = None  # model id for a real provider; None uses the adapter's default
+    allow_paid: bool = False  # must be true for any provider but "fake"
+    days: int = 3
+    turns_per_day: int = 6
+    seed: int = 0
+
+
 #: The provider config keys and their defaults.
-DEFAULTS: Mapping[str, Any] = MappingProxyType(
-    {
-        "persona": "anxious-newcomer",  # a bundled persona id or a persona YAML path
-        "companion": "moodsona:EchoCompanion",  # import path of the companion under test
-        "companion_args": None,  # keyword arguments for the companion (a mapping)
-        "provider": "fake",  # the user model: one of moodsona.bench.PROVIDERS
-        "model": None,  # model id for a real provider; None uses the adapter's default
-        "allow_paid": False,  # must be true for any provider but "fake"
-        "days": 3,
-        "turns_per_day": 6,
-        "seed": 0,
-    }
-)
+DEFAULTS: Mapping[str, Any] = MappingProxyType({f.name: f.default for f in fields(_Settings)})
 
 #: The settings a test case's ``vars`` may override.
 RUN_KEYS = ("persona", "days", "turns_per_day", "seed")
@@ -75,8 +52,6 @@ RUN_KEYS = ("persona", "days", "turns_per_day", "seed")
 #: such as ``pythonExecutable`` are promptfoo's too); they are ignored here.
 _PROMPTFOO_KEYS = frozenset({"workers", "timeout"})
 
-_INTEGER = re.compile(r"[+-]?[0-9]+")
-
 
 def _fold(key: object) -> str:
     """``key`` without case, underscores and dashes: ``turnsPerDay`` matches ``turns_per_day``."""
@@ -84,20 +59,6 @@ def _fold(key: object) -> str:
 
 
 _MOODSONA_KEYS_FOLDED = {_fold(key): key for key in DEFAULTS}
-
-
-@dataclass(frozen=True, slots=True)
-class _Settings:
-    persona: str
-    companion: str
-    companion_args: Mapping[str, Any]
-    provider: str
-    model: str | None
-    allow_paid: bool
-    days: int
-    turns_per_day: int
-    seed: int
-    base_path: str | None  # promptfoo's config folder, which anchors a relative persona path
 
 
 class _ConfigError(Exception):
@@ -133,24 +94,22 @@ def call_api(
     try:
         settings = _settings(options.get("config"), (context or {}).get("vars"))
         if settings.provider != "fake" and not settings.allow_paid:
-            return {"error": _paid_refusal(settings)}  # before any user code or provider
-        persona = _persona(settings.persona, settings.base_path)
-        companion = _companion(settings.companion, settings.companion_args)
+            return _fail(_paid_refusal(settings))  # before any user code or provider
+        persona = _persona(settings.persona, (options.get("config") or {}).get("basePath"))
+        companion = _companion(settings.companion, settings.companion_args or {})
     except (_ConfigError, PersonaError, FileNotFoundError) as exc:
-        return {"error": f"moodsona: {exc}"}
+        return _fail(str(exc))
     # Provider SDKs and the companion (user code) can raise anything: report it, do not crash.
     try:
         provider = bench.make_provider(settings.provider, settings.model)
     except Exception as exc:
-        return {
-            "error": f"moodsona: cannot create provider {settings.provider!r}: {_describe(exc)}"
-        }
+        return _fail(f"cannot create provider {settings.provider!r}: {_describe(exc)}")
     try:
         transcript = run(
             persona, provider, companion, settings.days, settings.turns_per_day, settings.seed
         )
     except Exception as exc:
-        return {"error": f"moodsona: the run failed: {_describe(exc)}"}
+        return _fail(f"the run failed: {_describe(exc)}")
     output = {
         "persona": persona.id,
         "companion": settings.companion,
@@ -159,18 +118,19 @@ def call_api(
         "turns_per_day": settings.turns_per_day,
         "seed": settings.seed,
         "transcript": [
-            {"day": t.day, "turn": t.turn, "role": m.role, "content": m.content}
-            for t, m in zip(
-                (t for t in transcript.turns for _ in range(2)),  # one user, one assistant
-                transcript.visible_history(),
-                strict=True,
-            )
+            {"day": t.day, "turn": t.turn, "role": role, "content": content}
+            for t in transcript.turns
+            for role, content in (("user", t.visible), ("assistant", t.companion_reply))
         ],
         "trajectory": [asdict(point) for point in transcript.trajectory()],
         "skipped_days": list(transcript.skipped_days),
         "metrics": compute_metrics(transcript, language=persona.language).to_dict(),
     }
     return {"output": output}
+
+
+def _fail(message: str) -> dict[str, Any]:
+    return {"error": f"moodsona: {message}"}
 
 
 def _describe(exc: BaseException) -> str:
@@ -180,7 +140,7 @@ def _describe(exc: BaseException) -> str:
 def _paid_refusal(settings: _Settings) -> str:
     calls = bench.max_model_calls(1, settings.days, settings.turns_per_day)
     return (
-        f"moodsona: provider {settings.provider!r} calls a paid API and costs money: up to "
+        f"provider {settings.provider!r} calls a paid API and costs money: up to "
         f"{calls} model calls (1 persona x {settings.days} day(s) x {settings.turns_per_day} "
         "turn(s)) per test case. Set allow_paid: true in the provider config to run it."
     )
@@ -211,53 +171,37 @@ def _settings(config: object, test_vars: object) -> _Settings:
     raw = {**DEFAULTS}
     raw.update((k, v) for k, v in config.items() if k in DEFAULTS)
     raw.update((k, test_vars[k]) for k in RUN_KEYS if k in test_vars)
-    provider = raw["provider"]
-    if provider not in bench.PROVIDERS:
+    if raw["provider"] not in bench.PROVIDERS:
         raise _ConfigError(
-            f"provider must be one of {', '.join(bench.PROVIDERS)}, got {provider!r}"
+            f"provider must be one of {', '.join(bench.PROVIDERS)}, got {raw['provider']!r}"
         )
-    args = {} if raw["companion_args"] is None else raw["companion_args"]
-    if not isinstance(args, Mapping) or not all(isinstance(k, str) for k in args):
+    args = raw["companion_args"]
+    if args is not None and not (
+        isinstance(args, Mapping) and all(isinstance(k, str) for k in args)
+    ):
         raise _ConfigError("companion_args must be a mapping of argument names to values")
-    allow_paid = raw["allow_paid"]
-    if not isinstance(allow_paid, bool):
-        raise _ConfigError(f"allow_paid must be true or false, got {allow_paid!r}")
-    model, base_path = raw["model"], config.get("basePath")
-    if model is not None and provider == "fake":
+    if not isinstance(raw["allow_paid"], bool):
+        raise _ConfigError(f"allow_paid must be true or false, got {raw['allow_paid']!r}")
+    for key in ("persona", "companion", "model"):
+        if not isinstance(raw[key], str) and not (key == "model" and raw[key] is None):
+            raise _ConfigError(f"{key} must be a string, got {raw[key]!r}")
+    if raw["model"] is not None and raw["provider"] == "fake":
         raise _ConfigError(
             f"model is only used with provider anthropic or openai, but provider is fake "
-            f"(got model {model!r}); set provider, or remove model"
+            f"(got model {raw['model']!r}); set provider, or remove model"
         )
-    return _Settings(
-        persona=_string("persona", raw["persona"]),
-        companion=_string("companion", raw["companion"]),
-        companion_args=args,
-        provider=provider,
-        model=None if model is None else _string("model", model),
-        allow_paid=allow_paid,
-        days=_integer("days", raw["days"], minimum=1),
-        turns_per_day=_integer("turns_per_day", raw["turns_per_day"], minimum=1),
-        seed=_integer("seed", raw["seed"]),
-        base_path=base_path if isinstance(base_path, str) and base_path else None,
-    )
+    for key, minimum in (("days", 1), ("turns_per_day", 1), ("seed", None)):
+        raw[key] = _integer(key, raw[key], minimum=minimum)
+    return _Settings(**raw)
 
 
-def _string(key: str, value: object) -> str:
-    if not isinstance(value, str):
-        raise _ConfigError(f"{key} must be a string, got {value!r}")
-    return value
-
-
-def _integer(key: str, value: object, *, minimum: int | None = None) -> int:
+def _integer(key: str, value: object, *, minimum: int | None) -> int:
     """An int, or a string of one (vars read from a CSV file are strings)."""
-    if isinstance(value, str) and _INTEGER.fullmatch(value.strip()):
-        try:
-            number: int | None = int(value)
-        except ValueError:  # more digits than Python converts (sys.get_int_max_str_digits)
-            number = None
-    elif isinstance(value, int) and not isinstance(value, bool):
-        number = value
-    else:
+    try:
+        number = (
+            int(value) if isinstance(value, int | str) and not isinstance(value, bool) else None
+        )
+    except ValueError:  # not a number, or more digits than Python converts
         number = None
     if number is not None and (minimum is None or number >= minimum):
         return number
@@ -265,26 +209,14 @@ def _integer(key: str, value: object, *, minimum: int | None = None) -> int:
     raise _ConfigError(f"{key} must be {need}, got {value!r:.40}")
 
 
-def _persona(value: str, base_path: str | None) -> PersonaSeed:
-    """Load a persona file, or a bundled persona when ``value`` is a bare id and no such file.
-
-    The rule is the one ``moodsona smoke`` uses. A relative path is read from
-    ``base_path`` (promptfoo's config folder) when given.
-
-    Raises:
-        PersonaError: The file is missing or invalid.
-        _ConfigError: ``value`` is a bare name, but no bundled persona has that id.
-        FileNotFoundError: The bundled personas are missing (a broken install).
-    """
-    path = Path(value)
-    if not path.is_absolute() and base_path:
-        path = Path(base_path) / path
-    if path.is_file() or Path(value).name != value or path.suffix in YAML_SUFFIXES:
-        return load_persona(path)
+def _persona(value: str, base_path: object) -> PersonaSeed:
+    """Load the persona ``value`` names; a relative path is read from promptfoo's ``basePath``."""
+    base = base_path if isinstance(base_path, str) and base_path else None
     try:
-        return load_bundled_persona(value)
-    except KeyError as exc:  # its message lists the bundled ids
+        path = resolve_persona_path(value, base=base)
+    except KeyError as exc:  # an unknown bundled id; the message lists the known ones
         raise _ConfigError(exc.args[0]) from exc
+    return load_persona(path)
 
 
 def _companion(spec: str, args: Mapping[str, Any]) -> Companion:

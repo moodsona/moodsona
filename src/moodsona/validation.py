@@ -23,6 +23,7 @@ from typing import Any, TextIO
 
 import yaml
 
+from moodsona.personas import YAML_SUFFIXES as YAML_SUFFIXES  # re-exported for the CLI
 from moodsona.personas import bundled_personas_dir, load_schema
 from moodsona.schema import validate
 
@@ -87,10 +88,6 @@ _UniqueKeyLoader.add_constructor(
     yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
     _construct_mapping,
 )
-
-
-#: File suffixes of persona files.
-YAML_SUFFIXES = frozenset({".yaml", ".yml"})
 
 
 def iter_files(args: Sequence[str | Path]) -> Iterator[Path]:

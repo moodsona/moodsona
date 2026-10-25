@@ -22,6 +22,9 @@ import yaml
 from moodsona.schema import validate
 from moodsona.state import DEFAULT_PRONOUNS, Mood, PersonaSeed, Pronouns, ReactionRule, Stance
 
+#: File suffixes of persona files.
+YAML_SUFFIXES = frozenset({".yaml", ".yml"})
+
 
 class PersonaError(ValueError):
     """A persona file cannot be read or does not match the schema.
@@ -85,6 +88,34 @@ def bundled_persona_path(persona_id: str) -> Path:
     if persona_id not in files:
         raise KeyError(f"no bundled persona {persona_id!r}; known: {sorted(files)}")
     return files[persona_id]
+
+
+def resolve_persona_path(arg: str, *, base: str | PathLike[str] | None = None) -> Path:
+    """The persona file ``arg`` names: a path, or the id of a bundled persona.
+
+    ``arg`` is a bundled persona id only when it is a bare name (no directory
+    part, no ``.yaml``/``.yml`` suffix) and no file of that name exists;
+    anything else is returned as a path, whether or not the file exists.
+
+    Args:
+        arg: A persona file path or a bundled persona id.
+        base: Folder a relative path is read from; None means the current
+            directory.
+
+    Returns:
+        The path of the persona file.
+
+    Raises:
+        KeyError: ``arg`` is a bare name, but no bundled persona has that id
+            (the message lists the bundled ids).
+        FileNotFoundError: The bundled personas are missing (a broken install).
+    """
+    path = Path(arg)
+    if base is not None and not path.is_absolute():
+        path = Path(base) / path
+    if path.is_file() or Path(arg).name != arg or path.suffix in YAML_SUFFIXES:
+        return path
+    return bundled_persona_path(arg)
 
 
 def load_bundled_persona(persona_id: str) -> PersonaSeed:
