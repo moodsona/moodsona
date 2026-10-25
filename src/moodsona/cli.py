@@ -23,7 +23,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TextIO
@@ -267,29 +269,50 @@ def _refuse_paid(provider: str, yes: bool, personas: int, days: int, turns: int)
 
 
 def _check_out(path: Path, *, force: bool) -> str | None:
-    """The problem with ``--out`` that can be seen without writing anything, or None."""
+    """The problem with ``--out`` that can be seen before the run, or None.
+
+    ``--out`` must not be a directory, nor exist (a dangling symlink counts)
+    unless ``force``, and the nearest existing folder on its path must take a
+    new file (a temporary one, removed at once). Missing folders are only
+    created when the transcript is written.
+    """
     if path.is_dir():
         return f"--out {path}: is a directory"
-    if path.exists() and not force:
+    if os.path.lexists(path) and not force:
         return f"--out {path}: already exists; choose another --out, or add --force to replace it"
+    folder = next(p for p in path.absolute().parents if p.exists())
+    try:
+        with tempfile.TemporaryFile(dir=folder):
+            pass
+    except OSError as exc:
+        return f"--out {path}: cannot write there: {exc}"
     return None
 
 
-def _claim_out(path: Path, *, force: bool) -> bool:
-    """Create ``path`` (empty) so the run's transcript can be written; True if it was new.
+def _save(transcript: Transcript, path: Path) -> str | None:
+    """Write the transcript to ``path``; the problem, or None.
 
-    Without ``force`` the file is created exclusively, so a second run with the
-    same ``--out`` cannot start; with ``force`` an existing file is opened for
-    appending, which checks it can be written without emptying it yet.
-
-    Raises:
-        OSError: The file exists (without ``force``) or cannot be written.
+    The JSONL goes to a temporary file next to ``path`` that then replaces it,
+    so an existing file (``--force``) stays as it was until the new one is
+    complete. When the replace fails, the temporary file is kept and named.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    new = not path.exists()
-    with path.open("a" if force else "x", encoding="utf-8"):
-        pass
-    return new
+    temp: Path | None = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            dir=path.parent, prefix=f"{path.name}.", suffix=".tmp", delete=False
+        ) as file:
+            temp = Path(file.name)
+        transcript.to_jsonl(temp)
+    except OSError as exc:
+        if temp is not None:
+            temp.unlink(missing_ok=True)
+        return f"cannot write the transcript to {path}: {exc}"
+    try:
+        os.replace(temp, path)
+    except OSError as exc:
+        return f"cannot replace {path}: {exc}; the transcript is in {temp}"
+    return None
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -312,23 +335,16 @@ def _run(args: argparse.Namespace) -> int:
         return 2
     if _refuse_paid(args.provider, args.yes, 1, args.days, args.turns):
         return 2
-    try:  # before the first (maybe paid) call, so the transcript can always be written
-        new = _claim_out(target, force=args.force)
-    except OSError as exc:
-        err.write(f"--out {target}: cannot write there: {exc}\n")
-        return 2
-    done = False
     try:
         provider = bench.make_provider(args.provider, args.model)
         transcript = run(seed, provider, companion, args.days, args.turns, args.seed)
-        transcript.to_jsonl(target)
-        done = True
     except (LookupError, LLMError, OSError) as exc:  # LLMError: e.g. the SDK is not installed
         err.write(f"{exc}\n")
         return 1
-    finally:
-        if new and not done:  # also on Ctrl-C: leave no empty file that blocks a rerun
-            target.unlink(missing_ok=True)
+    problem = _save(transcript, target)
+    if problem:
+        err.write(f"{problem}\n")
+        return 1
     label = bench.model_label(args.provider, provider)
     out.write(
         f"persona {seed.id}: {len(transcript.turns)} turn(s), "

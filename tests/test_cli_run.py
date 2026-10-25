@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import stat
 from pathlib import Path
 
 import pytest
@@ -204,34 +203,87 @@ def test_out_never_replaces_the_input_files(
     assert script.read_text(encoding="utf-8") == "Hello.\n"
 
 
-def test_out_is_claimed_before_the_first_model_call(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    out = tmp_path / "run.jsonl"
-    seen: list[bool] = []
-
-    def factory(name: str, model: str | None) -> FakeProvider:
-        seen.append(out.is_file())  # so a second run with the same --out cannot start
-        return FakeProvider()
-
-    monkeypatch.setattr(bench, "make_provider", factory)
-    assert main(_run(str(EXAMPLE), "--days", "1", "--turns", "1", "--out", str(out))) == 0
-    assert seen == [True]
-
-
-def test_a_forced_out_that_cannot_be_written_fails_before_any_model_call(
+def test_a_dangling_symlink_counts_as_an_existing_out(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _forbid_make_provider(monkeypatch)
-    out = tmp_path / "read-only.jsonl"
-    out.write_text("keep\n", encoding="utf-8")
-    out.chmod(stat.S_IREAD)
+    out = tmp_path / "run.jsonl"
     try:
-        assert main(_run(str(EXAMPLE), "--force", "--out", str(out))) == 2
-    finally:
-        out.chmod(stat.S_IREAD | stat.S_IWRITE)
-    assert "cannot write" in capsys.readouterr().err
-    assert out.read_text(encoding="utf-8") == "keep\n"
+        out.symlink_to(tmp_path / "gone.jsonl")
+    except OSError:  # Windows without the symlink privilege
+        pytest.skip("cannot create symlinks here")
+    assert main(_run(str(EXAMPLE), "--out", str(out))) == 2
+    assert "already exists" in capsys.readouterr().err
+
+
+def test_a_run_leaves_only_the_transcript(tmp_path: Path) -> None:
+    out = tmp_path / "run.jsonl"
+    assert main(_run(str(EXAMPLE), "--days", "1", "--turns", "1", "--out", str(out))) == 0
+    assert list(tmp_path.iterdir()) == [out]  # no temp file, no probe file
+
+
+def test_a_failed_run_creates_no_folders(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(bench, "make_provider", lambda name, model: FakeProvider([]))
+    out = tmp_path / "new" / "sub" / "run.jsonl"
+    assert main(_run(str(EXAMPLE), "--out", str(out))) == 1
+    assert not any(tmp_path.iterdir())
+
+
+def test_a_failed_replace_keeps_the_old_out_and_the_new_transcript(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out = tmp_path / "run.jsonl"
+    out.write_text("an earlier paid run\n", encoding="utf-8")
+
+    def refuse(src: object, dst: object) -> None:
+        raise PermissionError("the file is in use")
+
+    monkeypatch.setattr("moodsona.cli.os.replace", refuse)
+    args = _run(str(EXAMPLE), "--force", "--days", "1", "--turns", "1", "--out", str(out))
+    assert main(args) == 1
+    monkeypatch.undo()
+    err = capsys.readouterr().err
+    assert "the file is in use" in err
+    assert out.read_text(encoding="utf-8") == "an earlier paid run\n"
+    (kept,) = [p for p in tmp_path.iterdir() if p != out]
+    assert str(kept) in err
+    assert Transcript.from_jsonl(kept).persona_id == "anxious-newcomer"
+
+
+def test_a_temp_file_that_cannot_be_created_is_reported(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def no_temp(**kwargs: object) -> None:
+        raise PermissionError("access denied")
+
+    monkeypatch.setattr("moodsona.cli.tempfile.NamedTemporaryFile", no_temp)
+    out = tmp_path / "run.jsonl"
+    assert main(_run(str(EXAMPLE), "--days", "1", "--turns", "1", "--out", str(out))) == 1
+    monkeypatch.undo()
+    assert "cannot write the transcript" in capsys.readouterr().err
+    assert not any(tmp_path.iterdir())
+
+
+def test_a_failed_write_keeps_the_old_out_and_leaves_no_temp_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out = tmp_path / "run.jsonl"
+    out.write_text("an earlier paid run\n", encoding="utf-8")
+
+    def disk_full(self: Transcript, path: object) -> None:
+        Path(str(path)).write_text('{"kind": "ru', encoding="utf-8")  # a partial write
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(Transcript, "to_jsonl", disk_full)
+    args = _run(str(EXAMPLE), "--force", "--days", "1", "--turns", "1", "--out", str(out))
+    assert main(args) == 1
+    err = capsys.readouterr().err
+    assert "cannot write the transcript" in err
+    assert "No space left on device" in err
+    assert out.read_text(encoding="utf-8") == "an earlier paid run\n"
+    assert list(tmp_path.iterdir()) == [out]
 
 
 def test_a_failed_forced_run_keeps_the_old_out(
