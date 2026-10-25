@@ -12,8 +12,10 @@ and their defaults). A test case's ``vars`` may override the run settings in
 :data:`RUN_KEYS` (persona, days, turns per day, seed), so one provider can run
 several personas. The provider, model, ``allow_paid`` and the companion can
 only be set in the provider config, so a test case cannot switch to a paid
-model. Other vars are ignored (they may be meant for the prompt), and so is the
-prompt itself: the persona writes the user's lines.
+model. A key or var that differs from a moodsona key only in case, underscores
+or dashes (``turnsPerDay``) is an error. Other vars are ignored (they may be
+meant for the prompt), and so is the prompt itself: the persona writes the
+user's lines.
 
 The companion under test is named by an import path, ``"package.module:Name"``.
 ``Name`` (a class or a factory function) is called with ``companion_args`` as
