@@ -103,6 +103,6 @@ conversation continues with the day after, and the transcript lists the skipped
 day. The persona's mood moves overnight between days as in `moodsona.run`.
 
 The adapter reads only `AgentInput.messages` (OpenAI-style messages; content as
-a string or as a list of text parts) and returns the persona's message as a
-string, which scenario adds as a user message. The persona's model calls run in
+a string or as a list of text parts) and `AgentInput.thread_id`, and returns the
+persona's message as a string, which scenario adds as a user message. The persona's model calls run in
 a worker thread, so scenario's event loop is not blocked.
