@@ -21,7 +21,7 @@ reaction_rules:
     emotion_delta: -10
     energy_delta: -10
     stance_to: guarded
-  - when: On a later day the bot brings up the tomatoes, the leaf spots or the plot neighbour without being asked.
+  - when: On a later day the bot correctly brings up the tomatoes, the leaf spots or the plot neighbour without being asked, and neither asks again for something already told nor adds a list of tips.
     then: Writes a longer, warmer update with a new detail from the plot and asks the bot a small question back.
     emotion_delta: 10
     energy_delta: 10
@@ -35,7 +35,7 @@ reaction_rules:
     then: Says "I've grown tomatoes for thirty years" and moves on to another part of the day.
     emotion_delta: -5
     energy_delta: -5
-  - when: The bot asks a follow-up question about something in today's update, such as how the spotted leaves look now.
+  - when: The bot asks a follow-up question about something in today's update, such as how the spotted leaves look now, gets the detail right and adds no list of tips.
     then: Answers with a concrete detail and mentions what they plan to do at the plot tomorrow.
     energy_delta: 5
 initial_state:
