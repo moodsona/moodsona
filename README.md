@@ -58,6 +58,7 @@ offline and without an API key:
 ```bash
 moodsona smoke anxious-newcomer   # short simulated run of a bundled persona
 moodsona validate                 # check the bundled personas
+moodsona run anxious-newcomer --days 2 --turns 3 --out run.jsonl   # transcript + metrics
 ```
 
 `smoke` uses a fake model that writes placeholder messages, so it shows that
@@ -169,15 +170,36 @@ moodsona validate                     # all bundled personas
 moodsona validate my-persona.yaml     # your own files or directories
 moodsona smoke boundary-tester        # short offline run of a bundled persona
 moodsona smoke my-persona.yaml --days 2 --turns 4
+moodsona run anxious-newcomer --days 2 --turns 3 --out newcomer.jsonl
+moodsona run my-persona.yaml --companion script:replies.txt --out my-persona.jsonl
 ```
 
 `validate` checks persona files against [`personas/schema.json`](personas/schema.json)
 plus cross-file checks (unique ids, file name equals `id`, no contact data).
 `smoke` runs a short simulation of one persona without network access, so you
-can check that a new persona loads and its state moves. Both take file paths
-or the ids of bundled personas (an existing file wins over an id), and both
-exit with 0 on success, 1 when problems are found or the run fails, and 2 on a
-usage error. Run `moodsona <command> --help` for options.
+can check that a new persona loads and its state moves.
+
+`run` plays one persona against a companion, writes the transcript JSONL to
+`--out`, and prints the mood table and the `moodsona report` summary. The
+companion is `echo` (repeats the user, the default) or `script:<file>` (a
+UTF-8 file with one reply per line, blank lines skipped, used in order and
+then from the start again). The default user model is the offline fake one.
+`run` does not replace an existing `--out` unless you add `--force`, and then
+only once the new transcript is completely written. It checks the persona, the
+companion and `--out` before the first model call.
+With `--provider anthropic` or `--provider openai` the run **costs money**: it
+refuses to start without `--yes` and prints the worst-case number of model
+calls first:
+
+```bash
+pip install "moodsona[anthropic]"          # or moodsona[openai]
+moodsona run anxious-newcomer --provider anthropic --model claude-sonnet-5-5 --yes \
+  --companion script:replies.txt --days 2 --turns 4 --out paid-run.jsonl
+```
+
+All three take file paths or the ids of bundled personas (an existing file
+wins over an id), and exit with 0 on success, 1 when problems are found or the
+run fails, and 2 on a usage error. Run `moodsona <command> --help` for options.
 
 ## Fidelity check (experimental)
 
