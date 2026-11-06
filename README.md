@@ -238,9 +238,10 @@ write your own persona, see [docs/personas.md](docs/personas.md).
 - **v0.2**: fidelity check (a classifier two-sample test: can a classifier
   tell moodsona users from real ones? An experimental first cut is in
   `moodsona.fidelity`); a leaderboard of which models hold a
-  persona longest; adapters for
-  [langwatch/scenario](https://github.com/langwatch/scenario) and
-  [promptfoo](https://github.com/promptfoo/promptfoo).
+  persona longest (`moodsona bench` is the scaffold).
+- **Available, experimental**: adapters for
+  [langwatch/scenario](docs/integrations/scenario.md) and
+  [promptfoo](docs/integrations/promptfoo.md).
 - **v1.0**: more languages, stable API.
 
 ## How this relates to prior work

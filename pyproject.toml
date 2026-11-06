@@ -90,6 +90,7 @@ include = [
   "/src",
   "/personas",
   "/tests",
+  "/examples",
   "/LICENSE",
   "/LICENSE-DATA.md",
   "/NOTICE",
