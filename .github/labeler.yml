@@ -1,4 +1,6 @@
 # Area labels for actions/labeler (v5+ syntax). See .github/workflows/labeler.yml.
+# `dependencies` is deliberately absent: Dependabot applies it itself, and
+# sync-labels would otherwise remove it from PRs that bump actions or hooks.
 persona:
   - changed-files:
       - any-glob-to-any-file: ["personas/**"]
@@ -14,6 +16,3 @@ docs:
 ci:
   - changed-files:
       - any-glob-to-any-file: [".github/**", ".pre-commit-config.yaml"]
-dependencies:
-  - changed-files:
-      - any-glob-to-any-file: ["pyproject.toml", "uv.lock"]
