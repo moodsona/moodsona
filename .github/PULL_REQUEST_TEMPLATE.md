@@ -11,6 +11,14 @@
 - [ ] Persona PR: output of `moodsona validate` and `moodsona smoke` pasted below
 - [ ] No real people, private conversations, product logs or customer data
 
+<details><summary>moodsona validate / smoke output (persona PRs)</summary>
+
+```text
+
+```
+
+</details>
+
 ## AI assistance
 
 <!-- Required, see CONTRIBUTING.md#ai-assisted-contributions. Write "none" if no AI tools were used. -->

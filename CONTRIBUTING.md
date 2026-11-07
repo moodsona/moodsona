@@ -14,8 +14,9 @@ You need [uv](https://docs.astral.sh/uv/) and git; uv installs Python for you.
 git clone https://github.com/<you>/moodsona && cd moodsona
 uv sync --locked --extra dev        # .venv with all dev tools
 uv run pre-commit install           # lint + commit-message hooks on every commit
-uv run pre-commit run --all-files   # everything CI checks, locally
+uv run pre-commit run --all-files   # lint, types, typos and persona checks
 uv run pytest -m "not live" -q      # tests (`live` ones call real APIs and never run in CI)
+# CI runs the same two plus a wheel build and twine check.
 ```
 
 ## Contributing a persona
@@ -62,8 +63,8 @@ public API; `CHANGELOG.md` and the version are edited by release-please only.
   `fix: clamp energy at 0 after negative delta`, `feat!:` for a breaking change).
   PRs are squash-merged: the title becomes the commit and drives the changelog.
 - **CI must be green** (it needs no secrets) and **AI assistance is disclosed**.
-- **Review is by hand.** The maintainer reads every PR, comments and merges
-  (nothing is merged automatically), usually within a week.
+- **Review is by hand.** The maintainer reads every PR, comments and merges;
+  nothing is merged automatically.
 
 ## AI-assisted contributions
 

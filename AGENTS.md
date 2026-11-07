@@ -11,12 +11,13 @@ Repository files are English only.
 
 ```bash
 uv sync --locked --extra dev           # environment (never pip install into it)
-uv run pre-commit run --all-files      # lint, types, typos, persona checks: what CI runs
-uv run pytest -m "not live" -q         # tests without real API calls: what CI runs
-uv run pytest tests/test_x.py -q       # one test file
+uv run pre-commit run --all-files      # lint, types, typos, persona checks
+uv run pytest -m "not live" -q         # tests without real API calls
+uv run pytest tests/test_state.py -q   # one test file
 ```
 
-Run the gates and read their output before saying something works. Add
+Run the gates and read their output before saying something works; CI runs
+the same checks and additionally builds and verifies the wheel. Add
 dependencies only when asked, with `uv add` (runtime) or `uv add --optional dev`
 (tooling), and say why in the PR.
 
@@ -36,8 +37,8 @@ dependencies only when asked, with `uv add` (runtime) or `uv add --optional dev`
    stop and ask.
 4. **Do not touch without being asked:** `.github/workflows/`, `LICENSE*`,
    `NOTICE`, `personas/schema.json`, `release-please-config.json`,
-   `.release-please-manifest.json`, `CHANGELOG.md` and the version
-   (release-please owns the last two).
+   `.release-please-manifest.json`, `CHANGELOG.md` and the version in
+   `src/moodsona/version.py` (release-please owns the last two).
 5. **Git.** Branch from `origin/main`, one PR per branch, never stack PRs.
    Never push to `main`, force-push, merge, tag, release, publish to PyPI or
    change repository settings; the maintainer reviews and merges by hand.
