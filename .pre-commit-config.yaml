@@ -32,7 +32,7 @@ repos:
       - id: ruff-format
 
   # mypy runs from the project environment (uv), so it sees the real
-  # dependencies and the same version as CI. Requires `uv sync --extra dev`.
+  # dependencies and the same version as CI. Requires `uv sync`.
   - repo: local
     hooks:
       - id: mypy

@@ -37,7 +37,7 @@ jobs:
         with:
           python-version: "3.13"
           enable-cache: true
-      - run: uv sync --locked --extra dev
+      - run: uv sync --locked
       - run: uv run ruff check --output-format=github .
       - run: uv run ruff format --check .
       - run: uvx typos@1.51.1
@@ -56,7 +56,7 @@ jobs:
         with:
           python-version: "3.11" # type-check against the oldest supported version
           enable-cache: true
-      - run: uv sync --locked --extra dev
+      - run: uv sync --locked
       - run: uv run mypy
 
   test:
@@ -83,7 +83,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           enable-cache: true
-      - run: uv sync --locked --extra dev
+      - run: uv sync --locked
       # `live` tests call real model APIs and never run in CI (no secrets here).
       # Coverage threshold (fail_under = 85) comes from pyproject.toml.
       - run: uv run pytest -m "not live" --cov --cov-report=xml --cov-report=term
@@ -110,7 +110,7 @@ jobs:
         with:
           python-version: "3.13"
           enable-cache: true
-      - run: uv sync --locked --extra dev
+      - run: uv sync --locked
       - name: The schema is a valid JSON Schema
         run: uv run check-jsonschema --check-metaschema personas/schema.json
       - name: Every persona file matches the schema
@@ -143,7 +143,7 @@ jobs:
           python-version: "3.13"
           enable-cache: true
       - if: ${{ github.event_name == 'pull_request' }}
-        run: uv sync --locked --extra dev
+        run: uv sync --locked
       - name: Smoke every added or changed persona into the job summary
         if: ${{ github.event_name == 'pull_request' }}
         env:

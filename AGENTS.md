@@ -10,16 +10,18 @@ Repository files are English only.
 ## Setup and gates
 
 ```bash
-uv sync --locked --extra dev           # environment (never pip install into it)
+uv sync --locked                       # environment incl. dev tools (never pip install into it)
 uv run pre-commit run --all-files      # lint, types, typos, persona checks
 uv run pytest -m "not live" -q         # tests without real API calls
 uv run pytest tests/test_state.py -q   # one test file
 ```
 
-Run the gates and read their output before saying something works; CI runs
-the same checks and additionally builds and verifies the wheel. Add
-dependencies only when asked, with `uv add` (runtime) or `uv add --optional dev`
-(tooling), and say why in the PR.
+The gate is the two `uv run` commands above; `just check` (optional,
+[just](https://github.com/casey/just), recipes in `justfile`) runs both.
+Run the gate and read its output before saying something works; CI runs the
+same checks and additionally builds and verifies the wheel. Add dependencies
+only when asked, with `uv add` (runtime) or `uv add --dev` (tooling), and say
+why in the PR.
 
 ## Rules
 

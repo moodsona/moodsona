@@ -47,9 +47,12 @@ dependencies = ["pyyaml>=6.0"]
 # `OpenAI().chat.completions.create` (with `max_completion_tokens`).
 anthropic = ["anthropic>=1.0"]
 openai = ["openai>=1.45"]
-# Contributor tooling. `uv sync --extra dev` installs it.
-# (A PEP 735 [dependency-groups] table would keep these out of the published
-# metadata; an extra is used so that plain `pip install moodsona[dev]` works too.)
+
+# Contributor tooling (PEP 735). uv installs the `dev` group by default, so a
+# plain `uv sync --locked` gives a full development environment, and the group
+# stays out of the published wheel metadata (no `Provides-Extra: dev`).
+# The trade-off: `pip install moodsona[dev]` no longer exists; contributors use uv.
+[dependency-groups]
 dev = [
   "check-jsonschema>=0.38",
   "hypothesis>=6.150",

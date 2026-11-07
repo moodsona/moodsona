@@ -908,6 +908,11 @@ dependencies = [
 anthropic = [
     { name = "anthropic" },
 ]
+openai = [
+    { name = "openai" },
+]
+
+[package.dev-dependencies]
 dev = [
     { name = "check-jsonschema" },
     { name = "hypothesis" },
@@ -919,26 +924,27 @@ dev = [
     { name = "ruff" },
     { name = "types-pyyaml" },
 ]
-openai = [
-    { name = "openai" },
-]
 
 [package.metadata]
 requires-dist = [
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=1.0" },
-    { name = "check-jsonschema", marker = "extra == 'dev'", specifier = ">=0.38" },
-    { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.150" },
-    { name = "jsonschema", marker = "extra == 'dev'", specifier = ">=4.23" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=2.4" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=1.45" },
-    { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.7" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.17" },
-    { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.12" },
 ]
-provides-extras = ["anthropic", "dev", "openai"]
+provides-extras = ["anthropic", "openai"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "check-jsonschema", specifier = ">=0.38" },
+    { name = "hypothesis", specifier = ">=6.150" },
+    { name = "jsonschema", specifier = ">=4.23" },
+    { name = "mypy", specifier = ">=2.4" },
+    { name = "pre-commit", specifier = ">=4.7" },
+    { name = "pytest", specifier = ">=9.0" },
+    { name = "pytest-cov", specifier = ">=7.0" },
+    { name = "ruff", specifier = ">=0.17" },
+    { name = "types-pyyaml", specifier = ">=6.0.12" },
+]
 
 [[package]]
 name = "mypy"
