@@ -12,12 +12,16 @@ You need [uv](https://docs.astral.sh/uv/) and git; uv installs Python for you.
 
 ```bash
 git clone https://github.com/<you>/moodsona && cd moodsona
-uv sync --locked --extra dev        # .venv with all dev tools
+uv sync --locked                    # .venv with all dev tools
 uv run pre-commit install           # lint + commit-message hooks on every commit
 uv run pre-commit run --all-files   # lint, types, typos and persona checks
 uv run pytest -m "not live" -q      # tests (`live` ones call real APIs and never run in CI)
 # CI runs the same two plus a wheel build and twine check.
 ```
+
+Optional: with [just](https://github.com/casey/just) installed, `just check`
+runs the two gate commands (`just --list` shows the other recipes); without
+it, run them as above.
 
 ## Contributing a persona
 
