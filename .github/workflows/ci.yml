@@ -149,8 +149,10 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
-          git fetch --no-tags origin "$BASE_REF"
-          diff=$(git diff --name-only --diff-filter=AMR "origin/$BASE_REF...HEAD" -- personas)
+          # HEAD is the PR merge commit, so a two-tree diff against the base tip is
+          # the PR's change set and needs no merge base (the clone is shallow).
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          diff=$(git diff --name-only --diff-filter=AMR "origin/$BASE_REF" HEAD -- personas)
           changed=$(printf '%s\n' "$diff" | grep -E '\.ya?ml$' || true)
           if [ -z "$changed" ]; then
             echo "No persona file added or changed in this pull request; nothing to preview." \
