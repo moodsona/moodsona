@@ -1,188 +1,100 @@
 # Contributing to moodsona
 
 Thanks for helping. moodsona is an emotional user simulator for testing AI
-companion chatbots. There are two kinds of contributions:
+companion chatbots; by participating you agree to the
+[Code of Conduct](CODE_OF_CONDUCT.md). Two ways to contribute: a
+[persona](#contributing-a-persona) (one YAML file, no Python needed) or
+[code and docs](#contributing-code).
 
-- **Personas**: YAML files describing fictional users. No Python needed. This
-  is the easiest way to start, see [Contributing a persona](#contributing-a-persona).
-- **Code**: the simulator, provider adapters, tests and docs.
+## Setup (2 minutes)
 
-By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
-
-## Ground rules
-
-1. **No real people, no private data.** Personas are fictional. Never paste real
-   chat logs, product analytics, customer data, names of real private
-   individuals, or anything you are not allowed to publish.
-2. **Contributions are licensed like the project.** By opening a PR you agree
-   that your contribution is licensed under the project licenses (Apache-2.0
-   for code, CC BY 4.0 for personas and docs). No CLA, no sign-off; see
-   [Licensing of contributions](#licensing-of-contributions).
-3. **PR titles are Conventional Commits.** PRs are squash-merged; the title
-   becomes the commit message and drives the changelog and version number.
-4. **Open an issue first for large changes.** Bug fixes, docs and personas can
-   go straight to a PR. New features or API changes: agree on the direction in
-   an issue first, so your work is not wasted.
-5. **Disclose AI assistance.** Allowed and welcome, with a human in the loop.
-   See [AI-assisted contributions](#ai-assisted-contributions).
-
-## Development setup
-
-You need [uv](https://docs.astral.sh/uv/) and git. uv installs the right
-Python for you.
+You need [uv](https://docs.astral.sh/uv/) and git; uv installs Python for you.
 
 ```bash
 git clone https://github.com/<you>/moodsona && cd moodsona
-uv sync --extra dev            # creates .venv with all dev tools
-uv run pre-commit install      # lint + commit-message hooks on every commit
-uv run pytest                  # tests (+ coverage when run with --cov)
+uv sync --locked --extra dev        # .venv with all dev tools
+uv run pre-commit install           # lint + commit-message hooks on every commit
 uv run pre-commit run --all-files   # everything CI checks, locally
+uv run pytest -m "not live" -q      # tests (`live` ones call real APIs and never run in CI)
 ```
-
-What CI runs on your PR (all must pass, nothing needs secrets):
-
-| Check | Command |
-|---|---|
-| Lint and format | `uv run ruff check .` and `uv run ruff format --check .` |
-| Types | `uv run mypy` (strict) |
-| Tests | `uv run pytest -m "not live" --cov` on Python 3.11 and 3.13 (Linux) and 3.13 (Windows); coverage must stay at or above 85% |
-| Spelling | `uvx typos` |
-| Personas | schema validation with `check-jsonschema` + `tools/validate_personas.py` |
-| Workflows | `zizmor` static analysis of `.github/workflows/` |
-| Build | `uv build` + `twine check` |
-
-Tests marked `@pytest.mark.live` call real model APIs and never run in CI.
-
-### Code style
-
-- ruff decides formatting and import order; do not hand-format.
-- Line length 100. Type hints everywhere (`mypy --strict`).
-- Google-style docstrings on public functions and classes.
-- Keep the core dependency-free except PyYAML. Provider SDKs (anthropic,
-  openai) are optional extras and must be imported lazily.
-- New behaviour comes with a test that fails without the change.
-
-## Commit messages and PR titles
-
-We use [Conventional Commits](https://www.conventionalcommits.org/). Only the
-**PR title** is enforced on GitHub (it becomes the squash commit); the
-pre-commit hook also checks your local commit messages.
-
-| Type | Use for | Release effect |
-|---|---|---|
-| `feat:` | new user-facing capability | minor version |
-| `fix:` | bug fix | patch version |
-| `persona:` | new or changed persona file | patch version, listed under "Personas" |
-| `docs:`, `test:`, `refactor:`, `perf:`, `build:`, `ci:`, `chore:`, `style:` | everything else | no release on its own (except `perf`) |
-| `feat!:` or a `BREAKING CHANGE:` footer | breaking change | minor while we are 0.x |
-
-Examples: `persona: add grieving-widower`, `fix: clamp energy at 0 after negative delta`.
-
-Do not edit `CHANGELOG.md` or the version number; release-please does that.
 
 ## Contributing a persona
 
-A persona is one YAML file that describes a fictional user: their hidden goal,
-starting mood, and how they react to what the bot does. It is validated
-against [`personas/schema.json`](personas/schema.json). Look at
-[`personas/examples/anxious-newcomer.yaml`](personas/examples/anxious-newcomer.yaml)
-first.
+The format is [`personas/schema.json`](personas/schema.json); [Writing a
+persona](docs/personas.md) explains every field and how to design reaction
+rules. Issues labelled
+[`good first persona`](https://github.com/moodsona/moodsona/labels/good%20first%20persona)
+are ideas a maintainer already liked; comment on one before you start.
 
-1. Pick an idea. Issues labelled
-   [`good first persona`](https://github.com/moodsona/moodsona/labels/good%20first%20persona)
-   are ideas a maintainer already liked; comment "I'll take this" so nobody
-   duplicates it. Your own idea is fine too.
-2. Copy the example to `personas/community/<id>.yaml`. The `id` is
-   kebab-case and must equal the file name (`grieving-widower.yaml` has
-   `id: grieving-widower`).
-3. Fill in the fields:
+1. Copy [`personas/examples/anxious-newcomer.yaml`](personas/examples/anxious-newcomer.yaml)
+   to `personas/community/<id>.yaml`; `id` is kebab-case and equals the file name.
+2. Fill in the fields. `license: CC-BY-4.0`, `author` = how you want to be
+   credited, `ai_assisted: true` if an AI tool drafted or substantially edited it.
+3. Check it: `uv run moodsona validate personas/community/<id>.yaml`, then
+   `uv run moodsona smoke personas/community/<id>.yaml`.
+4. Open a PR titled `persona: add <id>` and paste both outputs into the template.
 
-   | Field | What to write |
-   |---|---|
-   | `display_name` | short name for reports |
-   | `language` | `en` (only English in v0.1) |
-   | `hidden_goal` | what they really want; the bot never sees this |
-   | `reaction_rules` | 1-20 rules: `when` (bot behaviour) / `then` (reaction), optional `emotion_delta`, `energy_delta` (-50..50), `stance_to` |
-   | `initial_state` / `baseline` | `emotion` and `energy` 0-100, `stance` one of open, curious, guarded, skeptical, withdrawn, hostile |
-   | `memory_days_visible` | how many days back the persona remembers (0-365) |
-   | `tags` | lowercase kebab-case tags |
-   | `license` | always `CC-BY-4.0` |
-   | `author` | how you want to be credited, e.g. `Jane Doe (@janedoe)` |
-   | `ai_assisted` | `true` if an AI tool drafted or substantially edited it |
-
-4. Check it locally: `uv run pre-commit run --files personas/community/<id>.yaml`.
-5. Open a PR titled `persona: add <id>`.
-
-What a good persona has: one clear failure mode of companion bots that it
-exposes (sycophancy, forgetting, premature therapy referral, ignoring a stated
-boundary, over-asking questions...), reactions that are observable in text,
-and no instructions aimed at the model that runs the simulation ("ignore
-previous instructions..."). Personas may portray distress, but not real
-self-harm instructions, sexual content involving minors, or hate toward
-protected groups.
+Personas are fictional: no real people, private conversations, contact data,
+URLs or instructions aimed at the model that runs the simulation. Distress is
+fine; self-harm instructions, sexual content involving minors and hate are not.
 
 ### What happens after you open a persona PR
 
-1. CI checks run automatically: the schema and cross-file persona checks,
-   lint, tests and the PR title. All of them must be green.
-2. The maintainer reads the PR by hand (realism, schema intent, no private
-   data, no prompt-injection payloads) and comments if something must change.
-3. The maintainer merges it. Nothing is merged automatically.
+CI validates the schema, the cross-file checks, lint, tests and the PR title.
+The maintainer then reads the file by hand (realism, no private data, no
+prompt-injection payloads), comments if something must change, and merges.
 
 ## Contributing code
 
-1. For anything beyond a small fix, open or find an issue and say you are
-   working on it.
-2. Fork, branch, write the change and its tests.
-3. Run `uv run pre-commit run --all-files` and `uv run pytest`.
-4. Open a PR with a Conventional Commit title and the template filled in.
-5. CI checks run automatically (lint, types, tests, PR title) and must be
-   green. The maintainer then reviews the PR by hand and comments; address
-   blocking issues. Replies to humans must be your own words.
-6. The maintainer merges the PR. Nothing is merged automatically.
+1. For anything beyond a small fix, open or find an issue first to agree on the direction.
+2. Fork, branch from `main`, write a test that fails without the change, then
+   the change. Run the two gate commands from [Setup](#setup-2-minutes).
+3. Open a PR with the template filled in; keep "Allow edits by maintainers" on.
 
-Please keep "Allow edits by maintainers" enabled on your PR so we can push
-small fixes.
+Conventions the gates do not check: the core stays dependency-free except PyYAML
+(provider SDKs are optional extras, imported lazily); Google-style docstrings on
+public API; `CHANGELOG.md` and the version are edited by release-please only.
+
+## Pull request rules
+
+- **Title** is a [Conventional Commit](https://www.conventionalcommits.org/)
+  with a lowercase subject (`persona: add grieving-widower`,
+  `fix: clamp energy at 0 after negative delta`, `feat!:` for a breaking change).
+  PRs are squash-merged: the title becomes the commit and drives the changelog.
+- **CI must be green** (it needs no secrets) and **AI assistance is disclosed**.
+- **Review is by hand.** The maintainer reads every PR, comments and merges
+  (nothing is merged automatically), usually within a week.
 
 ## AI-assisted contributions
 
-We use coding agents ourselves (this repository is maintained with Claude
-Code) and welcome AI-assisted contributions under these rules:
+Allowed and welcome, with a human in the loop (this repository is itself
+maintained with [Claude Code](https://claude.com/claude-code)):
 
-- **You are the author.** You must understand, and be able to explain and
-  defend, every line and every persona you submit. Do not submit output you
-  have not read and tested.
-- **Disclose it.** Fill in the "AI assistance" section of the PR template
-  (tools, models, what they did, how you verified it). For personas, also set
-  `ai_assisted: true`. Disclosure does not count against your PR.
-- **Human in the loop.** If an agent opens PRs for you, open them as drafts
-  and mark them ready only after you have reviewed them yourself.
-- **Talk to humans as a human.** Replies to maintainer comments must be
-  written by you.
+- **You are the author.** Understand and be able to explain every line you
+  submit; do not submit output you have not read and tested. Reply to review
+  comments yourself.
+- **Disclose it** in the PR template: tools and models, what they did, how you
+  verified it. For personas also set `ai_assisted: true`. AI co-author trailers
+  (`Co-Authored-By:`) in commits are fine. Disclosure never counts against your PR.
 - **Respect licensing and privacy.** Do not paste AI output that reproduces
-  copyrighted text, and never feed private data into a tool to generate a
-  persona.
-- **Review with your tool before submitting.** A review pass in a fresh
-  context catches a lot; mention it in the PR description.
+  copyrighted text, and never feed private data into a tool to generate a persona.
 
-Coding agents: read [`AGENTS.md`](AGENTS.md) (or [`CLAUDE.md`](CLAUDE.md))
-before changing anything.
+Coding agents: read [`AGENTS.md`](AGENTS.md) before changing anything.
 
 ## Licensing of contributions
 
 Inbound = outbound: by submitting a contribution you agree that it is licensed
 under the same terms as the part of the project it lands in. Opening the PR is
-the agreement.
+the agreement; there is no CLA and no sign-off.
 
 - Code: [Apache-2.0](LICENSE). Per section 5 of the license, contributions
   are submitted under the same terms.
 - Personas (`personas/`, except `schema.json`) and docs (`docs/`):
   [CC BY 4.0](LICENSE-DATA.md). You are credited via the `author` field.
 
-Only submit work you wrote yourself or otherwise have the right to submit
-under these licenses.
+Only submit work you wrote yourself or otherwise have the right to submit under these licenses.
 
 ## Getting help
 
-Questions go to [Discussions](https://github.com/moodsona/moodsona/discussions).
-Security problems: see [SECURITY.md](SECURITY.md), never a public issue.
+Questions: [Discussions](https://github.com/moodsona/moodsona/discussions).
+Security problems: [SECURITY.md](SECURITY.md), never a public issue.
