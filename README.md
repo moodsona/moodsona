@@ -138,11 +138,12 @@ model and per run. Run it once per model into the same directory to compare
 models. Offline check, free:
 
 ```bash
-moodsona bench --days 2 --turns 3          # fake provider, all bundled personas
+moodsona bench --days 2 --turns 3          # fake provider, the pinned default set
 ```
 
-With a real provider **every run costs money**: by default every bundled
-persona for 3 days of up to 6 turns, up to 20 model calls per persona and day.
+With a real provider **every run costs money**: by default the pinned set of
+personas (`BENCH_DEFAULT_PERSONAS`, seven today; `--persona` picks others) for
+3 days of up to 6 turns, up to 20 model calls per persona and day.
 The command refuses to start without `--yes` and prints the worst-case number
 of calls first. It checks the results already in `--out` before the first
 call. If a run fails, it stops, still writes `bench.md` for the finished runs,
