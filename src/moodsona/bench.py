@@ -34,7 +34,7 @@ from moodsona.llm.base import LLMError, LLMProvider
 from moodsona.llm.fake import FakeProvider
 from moodsona.llm.openai import OpenAIProvider
 from moodsona.metrics import TranscriptMetrics, compute_metrics, format_number, format_share
-from moodsona.personas import load_bundled_persona
+from moodsona.personas import list_bundled_personas, load_bundled_persona
 from moodsona.runner import Transcript, run
 from moodsona.simulator import SimulatorConfig
 from moodsona.state import PersonaSeed
@@ -273,7 +273,8 @@ def collect_runs(out_dir: str | PathLike[str]) -> list[BenchRun]:
     paths = sorted(Path(out_dir).glob("*/*.jsonl"))
     if not paths:
         return []
-    languages = {p.id: p.language for p in load_personas()}
+    # Every bundled persona, not only the default set: --persona runs any of them.
+    languages = {i: load_bundled_persona(i).language for i in list_bundled_personas()}
     runs = []
     for path in paths:
         transcript = Transcript.from_jsonl(path)
