@@ -120,6 +120,76 @@ jobs:
       - name: Cross-file checks (id = file name, unique ids, no contact data)
         run: uv run python tools/validate_personas.py
 
+  persona-preview:
+    # A PR that adds or changes a persona gets a short offline smoke run of
+    # each changed file in the job summary, so a reviewer sees how the persona
+    # moves without checking out the branch. The job runs on every event so
+    # that `ci-ok` always sees a result; outside pull requests (and when no
+    # persona changed) its steps do nothing. A smoke that fails fails the job.
+    name: persona-preview (smoke changed personas into the job summary)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # the diff against the base branch needs history
+      - if: ${{ github.event_name == 'pull_request' }}
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - if: ${{ github.event_name == 'pull_request' }}
+        run: uv sync --locked --extra dev
+      - name: Smoke every added or changed persona into the job summary
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags origin "$BASE_REF"
+          changed=$(git diff --name-only --diff-filter=AM "origin/$BASE_REF...HEAD" -- personas \
+            | grep -E '\.ya?ml$' || true)
+          if [ -z "$changed" ]; then
+            echo "No persona file added or changed in this pull request; nothing to preview." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "## Persona preview"
+            echo
+            echo "\`moodsona smoke\` of each added or changed persona: offline fake model,"
+            echo "echo companion, 1 day of 3 turns, seed 0. First 60 lines of each."
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+          status=0
+          while IFS= read -r file; do
+            echo "::group::$file"
+            if out=$(uv run moodsona smoke "$file" --days 1 --turns 3 --seed 0 2>&1); then
+              rc=0
+            else
+              rc=$?
+              status=1
+            fi
+            printf '%s\n' "$out"
+            echo "::endgroup::"
+            {
+              echo "### $file"
+              echo
+              if [ "$rc" -ne 0 ]; then
+                echo "**smoke failed with exit code $rc**"
+                echo
+              fi
+              echo '```text'
+              printf '%s\n' "$out" | head -n 60
+              echo '```'
+              echo
+            } >> "$GITHUB_STEP_SUMMARY"
+          done <<< "$changed"
+          exit "$status"
+
   build:
     name: build (sdist + wheel)
     runs-on: ubuntu-latest
@@ -182,7 +252,7 @@ jobs:
     # editing branch protection. Fails if any needed job failed or was cancelled.
     name: ci-ok
     if: ${{ always() }}
-    needs: [lint, typecheck, test, personas, build, zizmor]
+    needs: [lint, typecheck, test, personas, persona-preview, build, zizmor]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions: {}
