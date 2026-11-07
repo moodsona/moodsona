@@ -20,7 +20,7 @@ on:
   push:
     branches: [main]
   schedule:
-    # PRs merged by the auto-merge automation are merged with GITHUB_TOKEN and
+    # PRs merged by Dependabot auto-merge are merged with GITHUB_TOKEN and
     # therefore do not trigger `push`; the daily run picks them up.
     - cron: "17 6 * * *"
   workflow_dispatch:

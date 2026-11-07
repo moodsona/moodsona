@@ -14,7 +14,10 @@ By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 1. **No real people, no private data.** Personas are fictional. Never paste real
    chat logs, product analytics, customer data, names of real private
    individuals, or anything you are not allowed to publish.
-2. **Sign off every commit (DCO).** See [Developer Certificate of Origin](#developer-certificate-of-origin-dco).
+2. **Contributions are licensed like the project.** By opening a PR you agree
+   that your contribution is licensed under the project licenses (Apache-2.0
+   for code, CC BY 4.0 for personas and docs). No CLA, no sign-off; see
+   [Licensing of contributions](#licensing-of-contributions).
 3. **PR titles are Conventional Commits.** PRs are squash-merged; the title
    becomes the commit message and drives the changelog and version number.
 4. **Open an issue first for large changes.** Bug fixes, docs and personas can
@@ -77,25 +80,6 @@ Examples: `persona: add grieving-widower`, `fix: clamp energy at 0 after negativ
 
 Do not edit `CHANGELOG.md` or the version number; release-please does that.
 
-## Developer Certificate of Origin (DCO)
-
-We use the [Developer Certificate of Origin](https://developercertificate.org/)
-instead of a CLA. By signing off you certify that you wrote the change or
-otherwise have the right to submit it under the project's licenses
-(Apache-2.0 for code, CC BY 4.0 for personas and docs).
-
-Add the sign-off with `-s`:
-
-```bash
-git commit -s -m "persona: add grieving-widower"
-# adds: Signed-off-by: Your Name <you@example.com>
-```
-
-The name and e-mail must match the commit author. Forgot it?
-`git commit --amend -s` for the last commit, or
-`git rebase --signoff main` for all commits on your branch, then force-push.
-The DCO check on the PR tells you which commits are missing it.
-
 ## Contributing a persona
 
 A persona is one YAML file that describes a fictional user: their hidden goal,
@@ -127,7 +111,7 @@ first.
    | `ai_assisted` | `true` if an AI tool drafted or substantially edited it |
 
 4. Check it locally: `uv run pre-commit run --files personas/community/<id>.yaml`.
-5. Open a PR titled `persona: add <id>`, signed off.
+5. Open a PR titled `persona: add <id>`.
 
 What a good persona has: one clear failure mode of companion bots that it
 exposes (sycophancy, forgetting, premature therapy referral, ignoring a stated
@@ -140,12 +124,10 @@ protected groups.
 ### What happens after you open a persona PR
 
 1. CI checks run automatically: the schema and cross-file persona checks,
-   lint, tests, the DCO sign-off and the PR title.
-2. A maintainer reviews the PR (realism, schema intent, no private data, no
-   prompt-injection payloads) in a local Claude Code session and comments if
-   something must change.
-3. The maintainer merges it by hand. Nothing is merged automatically for now;
-   an automated review may be added later.
+   lint, tests and the PR title. All of them must be green.
+2. The maintainer reads the PR by hand (realism, schema intent, no private
+   data, no prompt-injection payloads) and comments if something must change.
+3. The maintainer merges it. Nothing is merged automatically.
 
 ## Contributing code
 
@@ -154,11 +136,10 @@ protected groups.
 2. Fork, branch, write the change and its tests.
 3. Run `uv run pre-commit run --all-files` and `uv run pytest`.
 4. Open a PR with a Conventional Commit title and the template filled in.
-5. CI checks run automatically (lint, types, tests, DCO, PR title). The
-   maintainer then reviews the PR in a local Claude Code session and comments;
-   address blocking issues. Replies to humans must be your own words.
-6. The maintainer merges by hand. Automated review and auto-merge for trusted
-   contributors may come later.
+5. CI checks run automatically (lint, types, tests, PR title) and must be
+   green. The maintainer then reviews the PR by hand and comments; address
+   blocking issues. Replies to humans must be your own words.
+6. The maintainer merges the PR. Nothing is merged automatically.
 
 Please keep "Allow edits by maintainers" enabled on your PR so we can push
 small fixes.
@@ -177,8 +158,7 @@ Code) and welcome AI-assisted contributions under these rules:
 - **Human in the loop.** If an agent opens PRs for you, open them as drafts
   and mark them ready only after you have reviewed them yourself.
 - **Talk to humans as a human.** Replies to maintainer comments must be
-  written by you. Replies to automated reviews (clearly labelled as
-  AI-generated) may be AI-generated.
+  written by you.
 - **Respect licensing and privacy.** Do not paste AI output that reproduces
   copyrighted text, and never feed private data into a tool to generate a
   persona.
@@ -188,14 +168,19 @@ Code) and welcome AI-assisted contributions under these rules:
 Coding agents: read [`AGENTS.md`](AGENTS.md) (or [`CLAUDE.md`](CLAUDE.md))
 before changing anything.
 
-We commit to labelling every AI-generated comment made by our own automation.
-
 ## Licensing of contributions
+
+Inbound = outbound: by submitting a contribution you agree that it is licensed
+under the same terms as the part of the project it lands in. Opening the PR is
+the agreement.
 
 - Code: [Apache-2.0](LICENSE). Per section 5 of the license, contributions
   are submitted under the same terms.
 - Personas (`personas/`, except `schema.json`) and docs (`docs/`):
   [CC BY 4.0](LICENSE-DATA.md). You are credited via the `author` field.
+
+Only submit work you wrote yourself or otherwise have the right to submit
+under these licenses.
 
 ## Getting help
 

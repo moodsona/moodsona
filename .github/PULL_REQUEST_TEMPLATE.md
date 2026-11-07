@@ -1,7 +1,6 @@
 <!--
 PR title = the squash commit on main, so it must be a Conventional Commit:
   feat: ..., fix: ..., persona: add <id>, docs: ..., test: ..., chore: ...
-Every commit needs a DCO sign-off: `git commit -s`.
 -->
 
 ## What and why
@@ -20,7 +19,6 @@ Every commit needs a DCO sign-off: `git commit -s`.
 - [ ] `uv run pre-commit run --all-files` passes locally
 - [ ] `uv run pytest` passes; new behaviour has a test that fails without the change
 - [ ] No real people, private conversations, product logs or customer data (personas are fictional)
-- [ ] Commits are signed off (`git commit -s`), see CONTRIBUTING.md
 
 ## AI assistance
 

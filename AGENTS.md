@@ -48,12 +48,12 @@ Never use `pip install` into the project; add dependencies with `uv add`
    Tests must not call the network unless marked `live`. Use `hypothesis` for
    numeric state logic (emotion/energy clamping, deltas).
 4. **Commits.** Conventional Commits (`feat:`, `fix:`, `persona:`, `docs:`,
-   `test:`, `chore:` ...), always signed off: `git commit -s`. Do not edit
-   `CHANGELOG.md` or the version; release-please owns them.
+   `test:`, `chore:` ...). Do not edit `CHANGELOG.md` or the version;
+   release-please owns them.
 5. **Do not touch without being asked:** `.github/workflows/`, `LICENSE*`,
    `NOTICE`, `personas/schema.json`, `release-please-config.json`,
-   `.release-please-manifest.json`, `.github/TRUSTED_CONTRIBUTORS`. Changes to
-   these need the maintainer's explicit request.
+   `.release-please-manifest.json`. Changes to these need the maintainer's
+   explicit request.
 6. **Never** push to `main`, merge PRs, create tags or releases, publish to
    PyPI, or change repository settings. Open a PR (as a draft if you created
    it autonomously) and let the maintainer decide.
