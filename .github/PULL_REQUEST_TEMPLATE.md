@@ -1,34 +1,18 @@
-<!--
-PR title = the squash commit on main, so it must be a Conventional Commit:
-  feat: ..., fix: ..., persona: add <id>, docs: ..., test: ..., chore: ...
--->
+<!-- Title = the squash commit: Conventional Commit, lowercase subject (feat: / fix: / persona: add <id> / docs: ...). -->
 
 ## What and why
 
 <!-- 2-3 sentences. Link the issue: "Closes #123". -->
 
-## Type
+## How verified
 
-- [ ] Persona (only adds files under `personas/community/`)
-- [ ] Bug fix
-- [ ] Feature / behaviour change
-- [ ] Docs, tests or tooling only
-
-## Checklist
-
-- [ ] `uv run pre-commit run --all-files` passes locally
-- [ ] `uv run pytest` passes; new behaviour has a test that fails without the change
-- [ ] No real people, private conversations, product logs or customer data (personas are fictional)
+- [ ] `uv run pre-commit run --all-files` passed
+- [ ] `uv run pytest -m "not live" -q` passed; new behaviour has a test that fails without the change
+- [ ] Persona PR: output of `moodsona validate` and `moodsona smoke` pasted below
+- [ ] No real people, private conversations, product logs or customer data
 
 ## AI assistance
 
-<!-- Required. See "AI-assisted contributions" in CONTRIBUTING.md. -->
-
-- [ ] No AI tools were used
-- [ ] AI tools were used. Tools/models: <!-- e.g. Claude Code (Claude Opus 5.5) -->
-      What they did: <!-- drafted persona text / wrote tests / reviewed the diff -->
-      How I verified it: <!-- read every line, ran the tests, compared with ... -->
-
-## Notes for the reviewer
-
-<!-- Anything non-obvious: trade-offs, follow-ups, how to test manually. -->
+<!-- Required, see CONTRIBUTING.md#ai-assisted-contributions. Write "none" if no AI tools were used. -->
+Tools/models: <!-- e.g. Claude Code (Claude Opus 5.5) -->
+What they did / how I verified it: <!-- drafted the persona; I read every line and ran the gates -->
