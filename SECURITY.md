@@ -41,5 +41,5 @@ Out of scope:
 
 Releases are built in GitHub Actions and published to PyPI with Trusted
 Publishing (OIDC, no long-lived tokens), with Sigstore attestations. Workflow
-actions are pinned to full commit SHAs, and workflows are scanned with zizmor,
-CodeQL and OpenSSF Scorecard.
+actions are pinned to full commit SHAs, workflows are scanned with zizmor and
+OpenSSF Scorecard, and the code with CodeQL (GitHub default setup).

@@ -42,7 +42,7 @@ What CI runs on your PR (all must pass, nothing needs secrets):
 |---|---|
 | Lint and format | `uv run ruff check .` and `uv run ruff format --check .` |
 | Types | `uv run mypy` (strict) |
-| Tests | `uv run pytest -m "not live" --cov` on Python 3.11-3.13, Linux and Windows; coverage must stay at or above 85% |
+| Tests | `uv run pytest -m "not live" --cov` on Python 3.11 and 3.13 (Linux) and 3.13 (Windows); coverage must stay at or above 85% |
 | Spelling | `uvx typos` |
 | Personas | schema validation with `check-jsonschema` + `tools/validate_personas.py` |
 | Workflows | `zizmor` static analysis of `.github/workflows/` |

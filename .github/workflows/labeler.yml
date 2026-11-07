@@ -1,4 +1,4 @@
-# Adds area labels (persona, code, docs, ci, dependencies) to every PR,
+# Adds area labels (persona, code, tests, docs, ci) to every PR,
 # including PRs from forks. Uses pull_request_target only to get a token that
 # can write labels; it never checks out or runs PR code. Config: .github/labeler.yml
 name: Labeler
