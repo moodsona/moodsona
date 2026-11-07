@@ -26,11 +26,11 @@ test:
 
 # Run one test file, e.g. `just test-file tests/test_state.py`.
 test-file FILE:
-    uv run pytest {{FILE}} -q
+    uv run pytest "{{FILE}}" -q
 
 # Offline smoke run of a persona (bundled id or path to a YAML file).
 smoke PERSONA="anxious-newcomer":
-    uv run moodsona smoke {{PERSONA}}
+    uv run moodsona smoke "{{PERSONA}}"
 
 # Validate the bundled personas against personas/schema.json.
 validate:

@@ -250,7 +250,7 @@ jobs:
           python-version: "3.13"
           enable-cache: true
       - name: Export runtime + provider dependencies (with hashes)
-        run: uv export --locked --no-emit-project --extra anthropic --extra openai --format requirements.txt -o requirements-audit.txt
+        run: uv export --locked --no-dev --no-emit-project --extra anthropic --extra openai --format requirements.txt -o requirements-audit.txt
       - run: uvx pip-audit@2.10.1 --strict --disable-pip --require-hashes -r requirements-audit.txt
 
   ci-ok:
