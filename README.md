@@ -255,7 +255,6 @@ take, is in [docs/METHOD.md](docs/METHOD.md#prior-work).
 ## Contributing
 
 - Persona PRs are the easiest way to help and are very welcome; see [docs/personas.md](docs/personas.md).
-- Sign off every commit (DCO): `git commit -s`.
 - PR titles follow Conventional Commits (`persona: add <id>`, `fix: ...`).
 - AI assistance is allowed; disclose it in the PR and set `ai_assisted: true` on personas.
 - Full rules: [CONTRIBUTING.md](CONTRIBUTING.md).

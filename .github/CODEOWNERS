@@ -4,7 +4,7 @@
 # ownership. Replace the team if the org/team name differs.
 *                           @moodsona/maintainers
 
-# Sensitive paths: changes here are never auto-merged (see claude-review.yml).
+# Sensitive paths: licensing, schema, release and CI configuration.
 /.github/                   @moodsona/maintainers
 /personas/schema.json       @moodsona/maintainers
 /LICENSE                    @moodsona/maintainers
@@ -14,7 +14,6 @@
 /release-please-config.json @moodsona/maintainers
 /CLAUDE.md                  @moodsona/maintainers
 /AGENTS.md                  @moodsona/maintainers
-/REVIEW.md                  @moodsona/maintainers
 
 # Community personas. Add persona curators here when you have them.
 /personas/community/        @moodsona/maintainers

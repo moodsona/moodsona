@@ -9,8 +9,8 @@ a quickstart.
 - [Writing a persona](personas.md): field-by-field guide to the persona
   format, how to design reaction rules, how to test and submit a persona.
 - [Persona ideas](persona-ideas.md): short briefs to turn into a first persona.
-- [Contributing](../CONTRIBUTING.md): development setup, commit rules, DCO,
-  AI-assisted contributions.
+- [Contributing](../CONTRIBUTING.md): development setup, commit rules,
+  licensing of contributions, AI-assisted contributions.
 
 The documentation is licensed under [CC BY 4.0](../LICENSE-DATA.md). Credit
 "moodsona documentation contributors" with a link to the repository.

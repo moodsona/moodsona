@@ -103,9 +103,6 @@ include = [
 line-length = 100
 target-version = "py311"
 src = ["src", "tests", "tools"]
-# Ruff also formats Python blocks in Markdown; the deferred automation notes
-# quote third-party scripts verbatim, so leave them alone.
-extend-exclude = ["docs/automation-later"]
 
 [tool.ruff.lint]
 select = [
