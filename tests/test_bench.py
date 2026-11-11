@@ -17,6 +17,7 @@ from moodsona.metrics import TranscriptMetrics, compute_metrics, metrics_from_js
 from moodsona.personas import list_bundled_personas, load_bundled_persona
 from moodsona.runner import Transcript
 from moodsona.state import PersonaSeed
+from support import forbid_make_provider
 
 
 def _run(
@@ -35,13 +36,6 @@ def _raising(error: BaseException) -> FakeProvider:
         raise error
 
     return FakeProvider(fail)
-
-
-def _forbid_make_provider(monkeypatch: pytest.MonkeyPatch) -> None:
-    def forbidden(name: str, model: str | None) -> FakeProvider:
-        raise AssertionError("no provider may be created")
-
-    monkeypatch.setattr(bench, "make_provider", forbidden)
 
 
 def test_run_one_writes_a_readable_transcript(tmp_path: Path) -> None:
@@ -148,7 +142,7 @@ def test_paid_providers_need_yes_and_never_start_without_it(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _forbid_make_provider(monkeypatch)
+    forbid_make_provider(monkeypatch)
     assert main(["bench", "--provider", provider, "--out", str(tmp_path)]) == 2
     err = capsys.readouterr().err
     assert "costs money" in err

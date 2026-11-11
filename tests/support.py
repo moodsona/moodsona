@@ -10,7 +10,21 @@ import random
 from dataclasses import replace
 from typing import Any
 
+import pytest
+
+from moodsona import bench
+from moodsona.llm.fake import FakeProvider
 from moodsona.state import Mood, PersonaSeed, Pronouns, ReactionRule, Stance
+
+
+def forbid_make_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make ``bench.make_provider`` fail the test, for paths that must not create a provider."""
+
+    def forbidden(name: str, model: str | None) -> FakeProvider:
+        raise AssertionError("no provider may be created")
+
+    monkeypatch.setattr(bench, "make_provider", forbidden)
+
 
 RULES = (
     ReactionRule(
