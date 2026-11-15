@@ -275,14 +275,15 @@ class SimulatedUser:
 
         Args:
             history: The final conversation, to read the chatbot's last reply.
-                Without it that reply is ``""`` and the notes read the day as
-                the last :meth:`reply` saw it.
+                Without it (or with an empty one) that reply is ``""`` and the
+                notes read the day as the last :meth:`reply` saw it.
 
         Returns:
             The transcript, in the form :func:`moodsona.run` returns.
 
         Raises:
-            ValueError: ``history`` is shorter than the one the last reply saw.
+            ValueError: A non-empty ``history`` is shorter than the one the
+                last reply saw.
             TypeError: A history item is neither a ChatMessage nor a mapping.
             moodsona.llm.LLMError: The notes call failed; calling again retries.
         """
@@ -306,7 +307,7 @@ class SimulatedUser:
 
         Args:
             history: The conversation so far, to fill in the chatbot's reply
-                to the last message (``""`` without it).
+                to the last message (``""`` without it or with an empty one).
 
         Returns:
             The transcript. The open day's notes are not in it yet. ``days`` is
@@ -314,7 +315,8 @@ class SimulatedUser:
             (None before the first reply).
 
         Raises:
-            ValueError: ``history`` is shorter than the one the last reply saw.
+            ValueError: A non-empty ``history`` is shorter than the one the
+                last reply saw.
             TypeError: A history item is neither a ChatMessage nor a mapping.
         """
         if self._final is not None:
