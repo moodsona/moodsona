@@ -4,6 +4,8 @@ moodsona simulates emotional users (personas) over several days to test AI
 companion chatbots. Start with the [README](../README.md) for installation and
 a quickstart.
 
+- [Usage guide](usage.md): real model providers, the CLI, metrics and
+  `moodsona report`, the benchmark scaffold, the experimental fidelity check.
 - [Method](METHOD.md): how the simulator works (hidden state, the turn loop,
   day memory), how it relates to prior research, limitations and ethical notes.
 - [Writing a persona](personas.md): field-by-field guide to the persona
