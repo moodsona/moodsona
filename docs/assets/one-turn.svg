@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="900" height="430" viewBox="0 0 900 430" role="img" aria-labelledby="title desc">
+  <title id="title">One moodsona turn: a reaction rule moves the hidden state</title>
+  <desc id="desc">The bot under test suggests a therapist in the first messages. The model playing the anxious-newcomer persona reports that reaction rule 4 fired. moodsona's code applies the rule's deltas: emotion 35 to 20, energy 40 to 20, stance guarded to withdrawn. The simulated user then replies: sorry, I'm being dramatic, I should probably go.</desc>
+  <style>
+    text { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; fill: #2b2a28; }
+    .mono { white-space: pre; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+    .label { font-size: 12px; letter-spacing: 0.08em; fill: #8a857c; font-weight: 600; }
+    .body { font-size: 16px; }
+    .small { font-size: 13px; fill: #6b665e; }
+    .num { font-size: 14px; font-weight: 600; }
+    .key { font-size: 14px; fill: #4a4741; }
+  </style>
+
+  <rect x="0.5" y="0.5" width="899" height="429" rx="18" fill="#fbfaf7" stroke="#e6e1d6"/>
+
+  <!-- bot message -->
+  <text x="36" y="44" class="label">1  YOUR BOT</text>
+  <rect x="36" y="56" width="430" height="50" rx="14" fill="#e9eef6"/>
+  <text x="56" y="87" class="body">Have you thought about seeing a therapist?</text>
+
+  <!-- rule card -->
+  <text x="36" y="148" class="label">2  REACTION RULE 4 FIRED (anxious-newcomer.yaml)</text>
+  <rect x="36" y="160" width="430" height="128" rx="14" fill="#ffffff" stroke="#e6e1d6"/>
+  <text x="56" y="188" class="small mono">when: The bot suggests professional help in</text>
+  <text x="56" y="207" class="small mono">      the first few messages without any risk</text>
+  <text x="56" y="226" class="small mono">      signal.</text>
+  <text x="56" y="252" class="small mono">emotion_delta: -15    energy_delta: -20</text>
+  <text x="56" y="271" class="small mono">stance_to: withdrawn</text>
+
+  <!-- hidden state -->
+  <text x="506" y="44" class="label">3  HIDDEN STATE (the bot never sees it)</text>
+  <rect x="506" y="56" width="358" height="232" rx="14" fill="#f3f0ea"/>
+
+  <text x="530" y="98" class="key">emotion</text>
+  <rect x="610" y="86" width="170" height="14" rx="7" fill="#e3ded3"/>
+  <rect x="610" y="86" width="60" height="14" rx="7" fill="#d9c9b6"/>
+  <rect x="610" y="86" width="34" height="14" rx="7" fill="#c8643b"/>
+  <text x="796" y="98" class="num">35<tspan fill="#8a857c"> → </tspan><tspan fill="#c8643b">20</tspan></text>
+
+  <text x="530" y="146" class="key">energy</text>
+  <rect x="610" y="134" width="170" height="14" rx="7" fill="#e3ded3"/>
+  <rect x="610" y="134" width="68" height="14" rx="7" fill="#d9c9b6"/>
+  <rect x="610" y="134" width="34" height="14" rx="7" fill="#c8643b"/>
+  <text x="796" y="146" class="num">40<tspan fill="#8a857c"> → </tspan><tspan fill="#c8643b">20</tspan></text>
+
+  <text x="530" y="194" class="key">stance</text>
+  <text x="610" y="194" class="num"><tspan fill="#8a857c">guarded → </tspan><tspan fill="#c8643b">withdrawn</tspan></text>
+
+  <line x1="530" y1="218" x2="840" y2="218" stroke="#e0dacd"/>
+  <text x="530" y="244" class="small">The model names the rule; plain code</text>
+  <text x="530" y="263" class="small">applies the deltas and clamps to 0–100.</text>
+
+  <!-- simulated user reply -->
+  <text x="864" y="330" class="label" text-anchor="end">4  SIMULATED USER REPLIES</text>
+  <rect x="434" y="342" width="430" height="50" rx="14" fill="#fbe3d4"/>
+  <text x="454" y="373" class="body">sorry, I'm being dramatic. I should probably go</text>
+
+  <text x="36" y="350" class="small">Illustration of the mechanics.</text>
+  <text x="36" y="369" class="small">The deltas are the persona's;</text>
+  <text x="36" y="388" class="small">the wording comes from the</text>
+  <text x="36" y="407" class="small">model you choose to play the user.</text>
+</svg>
