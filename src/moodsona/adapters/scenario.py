@@ -49,7 +49,7 @@ _AGENT_CLASS = "MoodsonaUserAgent"
 class _ScenarioUser(SimulatedUser):
     """A :class:`SimulatedUser` with scenario's ``call()``; needs no scenario installed."""
 
-    #: The scenario thread this persona talks in, once known.
+    #: The scenario thread this persona talks in, from its first successful reply.
     _thread_id: str | None = None
 
     async def call(self, input: Any) -> str:
@@ -57,9 +57,12 @@ class _ScenarioUser(SimulatedUser):
 
         :meth:`~moodsona.user.SimulatedUser.reply` makes blocking model calls;
         it runs in a worker thread, on a copy of the messages, so the event
-        loop stays free. Cancelling the call (a scenario timeout, for example)
-        does not stop a model call that has already started; the thread
-        finishes it in the background.
+        loop stays free. Cancelling the call from outside (a test timeout, for
+        example) does not stop a model call that has already started; the
+        thread finishes it in the background.
+
+        The first successful reply binds the agent to ``input.thread_id``; a
+        failed first call binds nothing, so the agent stays usable.
 
         Args:
             input: scenario's ``AgentInput``. Only ``input.messages``, the
@@ -74,14 +77,14 @@ class _ScenarioUser(SimulatedUser):
             moodsona.llm.LLMError: The model failed.
         """
         thread_id = input.thread_id
-        if self._thread_id is None:
-            self._thread_id = thread_id
-        elif thread_id is not None and thread_id != self._thread_id:
+        if self._thread_id is not None and thread_id != self._thread_id:
             raise ValueError(
                 f"this persona is in scenario thread {self._thread_id!r}, not {thread_id!r}; "
                 "use one agent per scenario run"
             )
-        return await asyncio.to_thread(self.reply, list(input.messages))
+        text = await asyncio.to_thread(self.reply, list(input.messages))
+        self._thread_id = thread_id
+        return text
 
 
 def user_simulator_agent(

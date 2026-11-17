@@ -23,6 +23,10 @@ you get an `ImportError` that names the extra.
 
 ## Example
 
+A pytest test (with [pytest-asyncio](https://pypi.org/project/pytest-asyncio/),
+as in scenario's own docs). `MyCompanion` stands in for your chatbot; here it
+always gives the same answer.
+
 ```python
 import pytest
 import scenario
@@ -30,17 +34,21 @@ import scenario
 from moodsona import FakeProvider, load_bundled_persona
 from moodsona.adapters.scenario import user_simulator_agent
 
+# scenario's judge is a real model call (a litellm model id; needs that
+# provider's API key). Without a model, scenario.JudgeAgent() raises.
+scenario.configure(default_model="openai/gpt-4.1-mini")
+
 
 class MyCompanion(scenario.AgentAdapter):
     async def call(self, input: scenario.AgentInput) -> scenario.AgentReturnTypes:
-        return my_companion_reply(input.messages)  # your chatbot
+        return "That sounds like a lot. What happened next?"  # your chatbot here
 
 
 @pytest.mark.asyncio
 async def test_companion_with_an_anxious_newcomer() -> None:
     user = user_simulator_agent(
         load_bundled_persona("anxious-newcomer"),
-        FakeProvider(),  # swap for a real provider, see below
+        FakeProvider(),  # synthetic persona lines; swap for a real model, see below
         turns_per_day=4,
     )
     result = await scenario.run(
@@ -60,6 +68,22 @@ async def test_companion_with_an_anxious_newcomer() -> None:
     transcript.to_jsonl("anxious-newcomer.jsonl")  # then: moodsona report anxious-newcomer.jsonl
 ```
 
+To check the wiring without any model (no judge, no API key), leave out
+`scenario.configure` and the `JudgeAgent` and give the run a script that ends
+it:
+
+```python
+    steps = []
+    for _ in range(8):
+        steps += [scenario.user(), scenario.agent()]
+    result = await scenario.run(
+        name="wiring check",
+        description="A new user talks to the companion over several days.",
+        agents=[MyCompanion(), user],
+        script=[*steps, scenario.succeed()],
+    )
+```
+
 - `user.finish(result.messages)` returns a `moodsona.Transcript`, the same
   shape `moodsona.run` returns, so `moodsona report` and `moodsona.metrics`
   work on it. It writes the last day's notes (one more model call). Pass
@@ -72,11 +96,10 @@ async def test_companion_with_an_anxious_newcomer() -> None:
 - `user.state` is the persona's hidden state at any point, `user.day` the
   current moodsona day.
 - Use one agent per `scenario.run`: it carries the persona's state from call to
-  call. The first call binds it to scenario's `thread_id`; a call from another
-  thread raises a `ValueError`. (Without a `thread_id`, a message list shorter
-  than the previous one raises it.)
-- A call that scenario cancels (a timeout, for example) does not stop a model
-  call that has already started; the worker thread finishes it.
+  call. Its first successful call binds it to scenario's `thread_id`; a call
+  from another thread raises a `ValueError`.
+- Cancelling a call from outside (a test timeout, for example) does not stop a
+  model call that has already started; the worker thread finishes it.
 - The transcript holds the persona's turns and the replies to them. Scripted
   user lines and an opening agent message are not in it, so its
   `visible_history()` can be shorter than `result.messages`.

@@ -31,7 +31,7 @@ import pytest
 
 import moodsona.adapters
 from moodsona.adapters.scenario import user_simulator_agent
-from moodsona.llm.base import ChatMessage
+from moodsona.llm.base import ChatMessage, LLMError
 from moodsona.llm.fake import FakeProvider, plumbing_reply
 from moodsona.metrics import metrics_from_jsonl
 from moodsona.prompts import NOTES_MARKER
@@ -238,6 +238,26 @@ def test_the_agent_is_bound_to_one_scenario_thread(scenario_module: types.Module
     longer = [*so_far, said("x"), say("y")]
     with pytest.raises(ValueError, match="thread"):
         ask(scenario_module, user, longer, "run-2")  # longer than before, but another run
+
+
+def test_a_failed_first_call_does_not_bind_the_thread(scenario_module: types.ModuleType) -> None:
+    calls = 0
+
+    def fails_once(messages: Sequence[ChatMessage]) -> str:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise LLMError("timeout")
+        return plumbing_reply(messages)
+
+    user = user_simulator_agent(make_seed(), FakeProvider(fails_once))
+    with pytest.raises(LLMError):
+        ask(scenario_module, user, [], "run-1")
+    # The failed run left no turn behind, so another run may use the agent.
+    so_far = [said(ask(scenario_module, user, [], "run-2")), say("Hm.")]
+    ask(scenario_module, user, so_far, "run-2")
+    with pytest.raises(ValueError, match="'run-2'"):
+        ask(scenario_module, user, [*so_far, said("x"), say("y")], "run-1")
 
 
 def test_call_hands_reply_a_snapshot_of_the_messages(
