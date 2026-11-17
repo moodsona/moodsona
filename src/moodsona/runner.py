@@ -285,11 +285,25 @@ def run(
         The transcript with per-turn records and day notes.
 
     Raises:
+        TypeError: ``companion`` has no ``reply`` method or ``user_model`` no
+            ``complete`` method, e.g. the two were swapped (raised before the
+            first model call).
         ValueError: ``days`` or ``turns_per_day`` is below 1.
         LookupError: No language profile covers the persona's language (raised
             before the first model call).
         moodsona.llm.LLMError: The user model failed.
     """
+    if not callable(getattr(companion, "reply", None)):
+        raise TypeError(
+            "run(): companion must have a reply(history) method; got "
+            f"{type(companion).__name__}. Pass the model that plays the persona as user_model="
+        )
+    if not callable(getattr(user_model, "complete", None)):
+        raise TypeError(
+            "run(): user_model must have a complete(messages) method; got "
+            f"{type(user_model).__name__}. Pass the chatbot under test as the second "
+            "positional argument (companion)"
+        )
     if days < 1 or turns_per_day < 1:
         raise ValueError("days and turns_per_day must be at least 1")
     # Imported here: moodsona.user builds on this module's Transcript and TurnRecord.

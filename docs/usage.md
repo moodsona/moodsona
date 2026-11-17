@@ -22,13 +22,20 @@ from moodsona.llm.anthropic import AnthropicProvider  # pip install "moodsona[an
 
 persona = moodsona.load_bundled_persona("boundary-tester")
 # MyBot: your companion, as in the README quickstart
-transcript = moodsona.run(persona, MyBot(), user_model=AnthropicProvider(), days=3, turns_per_day=6)
+transcript = moodsona.run(
+    persona,
+    MyBot(),
+    user_model=AnthropicProvider(),
+    days=1,
+    turns_per_day=3,
+)
 ```
 
 `run()` takes the persona and your bot by position and everything else by
 keyword. `user_model` has no default, so a run never plays a placeholder user
-by accident; `days` and `turns_per_day` default to 3 and 6. Every turn is one
-or more paid model calls; start with a short run.
+by accident. Every turn is one or more paid model calls, and the defaults
+(`days=3`, `turns_per_day=6`) mean up to 18 turns, so start with a short run
+such as `days=1, turns_per_day=3`, as above.
 
 The language checks (wrong-language rail, agreement and ask-back ceilings,
 optional typing noise) use the persona's `language` profile by default; pass

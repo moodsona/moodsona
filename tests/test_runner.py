@@ -182,13 +182,25 @@ untyped_run: Callable[..., Transcript] = run
 def test_run_takes_only_the_persona_and_the_companion_by_position(
     args: tuple[Any, ...], kwargs: dict[str, Any]
 ) -> None:
-    with pytest.raises(TypeError, match="takes 2 positional arguments"):
+    with pytest.raises(TypeError, match="positional"):
         untyped_run(make_seed(), EchoCompanion(), *args, **kwargs)
 
 
 def test_run_needs_an_explicit_user_model() -> None:
     with pytest.raises(TypeError, match="user_model"):
         untyped_run(make_seed(), EchoCompanion())
+
+
+def test_run_names_the_companion_when_it_is_a_model() -> None:
+    model = FakeProvider()
+    with pytest.raises(TypeError, match=r"companion must have a reply\(history\) method; got Fake"):
+        untyped_run(make_seed(), model, user_model=EchoCompanion())
+    assert model.calls == []
+
+
+def test_run_names_the_user_model_when_it_is_a_companion() -> None:
+    with pytest.raises(TypeError, match=r"user_model must have a complete\(messages\) method"):
+        untyped_run(make_seed(), EchoCompanion(), user_model=EchoCompanion())
 
 
 def test_run_defaults_to_three_days_of_six_turns() -> None:
