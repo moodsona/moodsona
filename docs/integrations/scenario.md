@@ -5,10 +5,11 @@
 [langwatch/scenario](https://github.com/langwatch/scenario) runs simulated
 conversations against your agent and lets a judge decide whether it behaved.
 `moodsona.adapters.scenario` lets a moodsona persona play the user in such a
-run, in place of scenario's own user simulator. The persona keeps its hidden
-state (emotion, energy, stance, notes about earlier days) inside the adapter
-across the whole run; scenario, your agent and the judge only see the visible
-messages.
+run, in place of scenario's own user simulator. The agent is a
+[`SimulatedUser`](../simulated-user.md) that scenario can call: each call
+returns `user.reply(input.messages)`. The persona keeps its hidden state
+(emotion, energy, stance, notes about earlier days) inside the agent across the
+whole run; scenario, your agent and the judge only see the visible messages.
 
 ## Install
 
@@ -54,19 +55,22 @@ async def test_companion_with_an_anxious_newcomer() -> None:
     )
     assert result.success
 
-    transcript = user.transcript(result.messages)
-    transcript.to_jsonl("anxious-newcomer.jsonl")  # then: moodsona report anxious-newcomer.jsonl
     print(user.metrics(result.messages))
+    transcript = user.finish(result.messages)
+    transcript.to_jsonl("anxious-newcomer.jsonl")  # then: moodsona report anxious-newcomer.jsonl
 ```
 
-- `user.transcript(result.messages)` returns a `moodsona.Transcript`, the same
+- `user.finish(result.messages)` returns a `moodsona.Transcript`, the same
   shape `moodsona.run` returns, so `moodsona report` and `moodsona.metrics`
-  work on it. Pass `result.messages` so the agent's last reply is recorded;
-  without it that reply is empty.
+  work on it. It writes the last day's notes (one more model call). Pass
+  `result.messages` so the agent's last reply is recorded; without it that
+  reply is empty. `user.transcript(result.messages)` is the same without the
+  last day's notes and without a model call.
 - `user.metrics(result.messages)` computes the metrics directly. It uses the
   persona's language profile; `moodsona report` uses English. For every
   bundled persona the two are the same.
-- `user.simulator.state` is the persona's hidden state at any point.
+- `user.state` is the persona's hidden state at any point, `user.day` the
+  current moodsona day.
 - Use one agent per `scenario.run`: it carries the persona's state from call to
   call. The first call binds it to scenario's `thread_id`; a call from another
   thread raises a `ValueError`. (Without a `thread_id`, a message list shorter
@@ -91,18 +95,26 @@ own.
 
 | scenario | moodsona |
 |---|---|
-| a call to the user agent | one persona turn (`Simulator.next_turn`) |
+| a call to the user agent | one persona turn (`SimulatedUser.reply`) |
 | `turns_per_day` user turns, or fewer if the persona ends the day | one moodsona day; the next call writes the day's notes and starts the next day |
 | assistant messages after the persona's message | the companion's reply |
 | system, tool and developer messages, tool calls without text | not shown to the persona |
-| `max_turns`, the judge or the script | when the run stops; the last day's notes are not written |
+| `max_turns`, the judge or the script | when the run stops; `user.finish(result.messages)` writes the last day's notes |
 | a scripted user line (`scenario.user("...")`), an opening agent message | shown to the persona as part of the day, not recorded in the transcript |
 
 A day the persona decides to skip (`skip_tomorrow`) has no messages: the
 conversation continues with the day after, and the transcript lists the skipped
 day. The persona's mood moves overnight between days as in `moodsona.run`.
+[SimulatedUser](../simulated-user.md) describes the days and what the persona
+reads in detail.
 
 The adapter reads only `AgentInput.messages` (OpenAI-style messages; content as
 a string or as a list of text parts) and `AgentInput.thread_id`, and returns the
-persona's message as a string, which scenario adds as a user message. The persona's model calls run in
-a worker thread, so scenario's event loop is not blocked.
+persona's message as a string, which scenario adds as a user message. The
+persona's model calls run in a worker thread, so scenario's event loop is not
+blocked.
+
+## License
+
+This page, like the rest of the documentation, is licensed under
+[CC BY 4.0](../../LICENSE-DATA.md).
