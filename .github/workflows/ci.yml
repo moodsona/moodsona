@@ -33,11 +33,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           python-version: "3.13"
           enable-cache: true
-      - run: uv sync --locked --extra dev
+      - run: uv sync --locked
       - run: uv run ruff check --output-format=github .
       - run: uv run ruff format --check .
       - run: uvx typos@1.51.1
@@ -52,11 +52,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           python-version: "3.11" # type-check against the oldest supported version
           enable-cache: true
-      - run: uv sync --locked --extra dev
+      - run: uv sync --locked
       - run: uv run mypy
 
   test:
@@ -67,18 +67,23 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
+      # Three cells instead of the full os x python product: the oldest and
+      # newest supported Python on Linux, plus the newest on Windows (path and
+      # encoding differences). 3.12 is covered by the 3.11..3.13 bracket.
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        python: ["3.11", "3.12", "3.13"]
+        include:
+          - { os: ubuntu-latest, python: "3.11" }
+          - { os: ubuntu-latest, python: "3.13" }
+          - { os: windows-latest, python: "3.13" }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           python-version: ${{ matrix.python }}
           enable-cache: true
-      - run: uv sync --locked --extra dev
+      - run: uv sync --locked
       # `live` tests call real model APIs and never run in CI (no secrets here).
       # Coverage threshold (fail_under = 85) comes from pyproject.toml.
       - run: uv run pytest -m "not live" --cov --cov-report=xml --cov-report=term
@@ -101,11 +106,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           python-version: "3.13"
           enable-cache: true
-      - run: uv sync --locked --extra dev
+      - run: uv sync --locked
       - name: The schema is a valid JSON Schema
         run: uv run check-jsonschema --check-metaschema personas/schema.json
       - name: Every persona file matches the schema
@@ -114,6 +119,82 @@ jobs:
             | xargs -0 --no-run-if-empty uv run check-jsonschema --schemafile personas/schema.json
       - name: Cross-file checks (id = file name, unique ids, no contact data)
         run: uv run python tools/validate_personas.py
+
+  persona-preview:
+    # A PR that adds or changes a persona gets a short offline smoke run of
+    # each changed file in the job summary, so a reviewer sees how the persona
+    # moves without checking out the branch. The job runs on every event so
+    # that `ci-ok` always sees a result; outside pull requests (and when no
+    # persona changed) its steps do nothing. A smoke that fails fails the job.
+    name: persona-preview (smoke changed personas into the job summary)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1 # the base branch is fetched explicitly below
+      - if: ${{ github.event_name == 'pull_request' }}
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - if: ${{ github.event_name == 'pull_request' }}
+        run: uv sync --locked
+      - name: Smoke every added or changed persona into the job summary
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          # HEAD is the PR merge commit, so a two-tree diff against the base tip is
+          # the PR's change set and needs no merge base (the clone is shallow).
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          diff=$(git diff --name-only --diff-filter=AMR "origin/$BASE_REF" HEAD -- personas)
+          changed=$(printf '%s\n' "$diff" | grep -E '\.ya?ml$' || true)
+          if [ -z "$changed" ]; then
+            echo "No persona file added or changed in this pull request; nothing to preview." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "## Persona preview"
+            echo
+            echo "\`moodsona smoke\` of each added or changed persona: offline fake model,"
+            echo "echo companion, 1 day of 3 turns, seed 0. First 60 lines of each."
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+          status=0
+          while IFS= read -r file; do
+            echo "::group::$file"
+            if out=$(uv run moodsona smoke "$file" --days 1 --turns 3 --seed 0 2>&1); then
+              rc=0
+            else
+              rc=$?
+              status=1
+            fi
+            # Persona text ends up in the log: stop workflow commands while it prints.
+            token=$(openssl rand -hex 16)
+            echo "::stop-commands::$token"
+            printf '%s\n' "$out"
+            echo "::$token::"
+            echo "::endgroup::"
+            {
+              echo "### $file"
+              echo
+              if [ "$rc" -ne 0 ]; then
+                echo "**smoke failed with exit code $rc**"
+                echo
+              fi
+              echo '```text'
+              printf '%s\n' "$out" | head -n 60
+              echo '```'
+              echo
+            } >> "$GITHUB_STEP_SUMMARY"
+          done <<< "$changed"
+          exit "$status"
 
   build:
     name: build (sdist + wheel)
@@ -125,7 +206,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           python-version: "3.13"
           enable-cache: true
@@ -144,7 +225,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: zizmorcore/zizmor-action@85b2b9fb8e3325e7a23d7d0a9d7ba5ae0f999e3e # v0.7.1
+      - uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
         with:
           # Plain failing check instead of SARIF upload: works on fork PRs,
           # needs no security-events permission.
@@ -164,12 +245,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           python-version: "3.13"
           enable-cache: true
       - name: Export runtime + provider dependencies (with hashes)
-        run: uv export --locked --no-emit-project --extra anthropic --extra openai --format requirements.txt -o requirements-audit.txt
+        run: uv export --locked --no-dev --no-emit-project --extra anthropic --extra openai --format requirements.txt -o requirements-audit.txt
       - run: uvx pip-audit@2.10.1 --strict --disable-pip --require-hashes -r requirements-audit.txt
 
   ci-ok:
@@ -177,7 +258,7 @@ jobs:
     # editing branch protection. Fails if any needed job failed or was cancelled.
     name: ci-ok
     if: ${{ always() }}
-    needs: [lint, typecheck, test, personas, build, zizmor]
+    needs: [lint, typecheck, test, personas, persona-preview, build, zizmor]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions: {}

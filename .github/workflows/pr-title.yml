@@ -1,11 +1,13 @@
 # PR title must be a Conventional Commit: PRs are squash-merged, so the title
 # becomes the commit on main that release-please reads to pick the next
 # version and write the changelog. Required check in the ruleset: `pr-title`.
+# Dependabot PRs (label `dependencies`) are exempt: their subjects start with
+# a capital "Bump"; the type (`ci`/`build`) is already set in dependabot.yml.
 name: PR title
 
 on:
   pull_request:
-    types: [opened, edited, synchronize, reopened]
+    types: [opened, edited, synchronize, reopened, labeled, unlabeled]
 
 permissions: {}
 
@@ -21,7 +23,7 @@ jobs:
     permissions:
       pull-requests: read
     steps:
-      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+      - uses: amannn/action-semantic-pull-request@2252a14e810aa9b85c2d560bd7070c802206ecf6 # v6.1.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -40,6 +42,9 @@ jobs:
             chore
             revert
           requireScope: false
+          # Dependabot applies this label itself; the labeler never touches it.
+          ignoreLabels: |
+            dependencies
           subjectPattern: ^(?![A-Z]).+$
           subjectPatternError: |
             The subject "{subject}" of the PR title "{title}" must start with a

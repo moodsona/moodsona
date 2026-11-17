@@ -25,14 +25,14 @@ repos:
       - id: detect-private-key
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.17.1
+    rev: v0.17.2
     hooks:
       - id: ruff-check
         args: [--fix]
       - id: ruff-format
 
   # mypy runs from the project environment (uv), so it sees the real
-  # dependencies and the same version as CI. Requires `uv sync --extra dev`.
+  # dependencies and the same version as CI. Requires `uv sync`.
   - repo: local
     hooks:
       - id: mypy

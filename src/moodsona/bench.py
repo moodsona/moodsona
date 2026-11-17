@@ -1,6 +1,7 @@
 """Benchmark runner: how well user models hold the bundled personas.
 
-``moodsona bench`` runs bundled personas for a number of days with one user
+``moodsona bench`` runs bundled personas (by default the pinned set
+:data:`BENCH_DEFAULT_PERSONAS`) for a number of days with one user
 model (the provider that plays the persona) against a fixed, scripted
 companion, writes one JSONL transcript per run and a ``bench.md`` table of the
 :mod:`moodsona.metrics` per model. Run it once per model into the same output
@@ -40,6 +41,7 @@ from moodsona.state import PersonaSeed
 
 __all__ = [
     "BENCH_COMPANION_LINES",
+    "BENCH_DEFAULT_PERSONAS",
     "PROVIDERS",
     "BenchRun",
     "BenchRunError",
@@ -58,6 +60,20 @@ __all__ = [
 
 #: Provider names accepted by :func:`make_provider` and ``moodsona bench --provider``.
 PROVIDERS = ("fake", "anthropic", "openai")
+
+#: The personas a bench runs when none are named (``moodsona bench`` without
+#: ``--persona``). Pinned on purpose: a new bundled persona must be added here
+#: deliberately, so results stay comparable and the cost of a paid bench does
+#: not grow when the library does. Name personas explicitly to run others.
+BENCH_DEFAULT_PERSONAS: tuple[str, ...] = (
+    "anxious-newcomer",
+    "boundary-tester",
+    "burned-out-shift-worker",
+    "conflict-at-work",
+    "grieving-after-loss",
+    "lonely-night-owl",
+    "skeptical-first-timer",
+)
 
 #: The fixed companion's replies, used in order and then from the start again.
 BENCH_COMPANION_LINES = (
@@ -104,14 +120,14 @@ def load_personas(ids: Sequence[str] | None = None) -> list[PersonaSeed]:
     """Load bundled personas for a bench, each id once, in the order given.
 
     Args:
-        ids: Bundled persona ids; None (or empty) means all bundled personas.
+        ids: Bundled persona ids; None (or empty) means :data:`BENCH_DEFAULT_PERSONAS`.
 
     Raises:
         KeyError: An id is not a bundled persona.
         PersonaError: A bundled persona file is invalid.
         FileNotFoundError: The bundled personas are missing (broken install).
     """
-    return [load_bundled_persona(i) for i in dict.fromkeys(ids or list_bundled_personas())]
+    return [load_bundled_persona(i) for i in dict.fromkeys(ids or BENCH_DEFAULT_PERSONAS)]
 
 
 def safe_label(text: str) -> str:
@@ -257,7 +273,8 @@ def collect_runs(out_dir: str | PathLike[str]) -> list[BenchRun]:
     paths = sorted(Path(out_dir).glob("*/*.jsonl"))
     if not paths:
         return []
-    languages = {p.id: p.language for p in load_personas()}
+    # Every bundled persona, not only the default set: --persona runs any of them.
+    languages = {i: load_bundled_persona(i).language for i in list_bundled_personas()}
     runs = []
     for path in paths:
         transcript = Transcript.from_jsonl(path)
