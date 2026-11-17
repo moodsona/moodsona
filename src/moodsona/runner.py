@@ -250,23 +250,29 @@ def _note_from_dict(data: dict[str, Any]) -> DayNote:
 
 
 def run(
-    seed: PersonaSeed,
-    provider: LLMProvider,
+    persona: PersonaSeed,
     companion: Companion,
-    days: int,
-    turns_per_day: int,
-    rng_seed: int = 0,
     *,
+    user_model: LLMProvider,
+    days: int = 3,
+    turns_per_day: int = 6,
+    rng_seed: int = 0,
     language: LanguageProfile | None = None,
     safety_hook: SafetyHook | None = None,
     config: SimulatorConfig | None = None,
 ) -> Transcript:
     """Simulate ``days`` days of conversation between a persona and a companion.
 
+    Only the persona and the companion are positional; everything else is
+    passed by keyword, e.g.
+    ``run(persona, MyBot(), user_model=AnthropicProvider(), days=2)``.
+
     Args:
-        seed: The persona.
-        provider: The model that writes the persona's lines.
+        persona: The persona.
         companion: The chatbot under test.
+        user_model: The model that writes the persona's lines (required, so a
+            run never falls back to a placeholder model by accident; use
+            :class:`~moodsona.llm.FakeProvider` for offline runs).
         days: Number of simulated days.
         turns_per_day: Maximum persona messages per day.
         rng_seed: Seed for overnight energy and typing noise.
@@ -282,7 +288,7 @@ def run(
         ValueError: ``days`` or ``turns_per_day`` is below 1.
         LookupError: No language profile covers the persona's language (raised
             before the first model call).
-        moodsona.llm.LLMError: The provider failed.
+        moodsona.llm.LLMError: The user model failed.
     """
     if days < 1 or turns_per_day < 1:
         raise ValueError("days and turns_per_day must be at least 1")
@@ -290,8 +296,8 @@ def run(
     from moodsona.user import SimulatedUser
 
     user = SimulatedUser(
-        seed,
-        provider,
+        persona,
+        user_model,
         turns_per_day=turns_per_day,
         days=days,
         rng_seed=rng_seed,

@@ -250,8 +250,18 @@ def test_run_and_a_hand_written_loop_match_the_old_run(
         )
         return openai_loop(user, companion)
 
+    def with_run(provider: FakeProvider, companion: Companion) -> Transcript:
+        return run(
+            seed,
+            companion,
+            user_model=provider,
+            days=days,
+            turns_per_day=turns_per_day,
+            rng_seed=rng_seed,
+        )
+
     old = once("old", lambda p, c: reference_run(seed, p, c, days, turns_per_day, rng_seed))
-    assert once("run", lambda p, c: run(seed, p, c, days, turns_per_day, rng_seed)) == old
+    assert once("run", with_run) == old
     assert once("loop", by_hand) == old
 
 

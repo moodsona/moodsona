@@ -148,7 +148,14 @@ def _smoke(args: argparse.Namespace) -> int:
         sys.stderr.write("--days and --turns must be at least 1\n")
         return 1
     try:
-        transcript = run(seed, FakeProvider(), EchoCompanion(), args.days, args.turns, args.seed)
+        transcript = run(
+            seed,
+            EchoCompanion(),
+            user_model=FakeProvider(),
+            days=args.days,
+            turns_per_day=args.turns,
+            rng_seed=args.seed,
+        )
     except (LookupError, LLMError) as exc:
         sys.stderr.write(f"{exc}\n")
         return 1

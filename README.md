@@ -129,8 +129,8 @@ class MyBot:  # wrap your HTTP endpoint, SDK call or local function like this
 persona = moodsona.load_bundled_persona("anxious-newcomer")  # or load_persona("my.yaml")
 transcript = moodsona.run(
     persona,
-    FakeProvider(),  # the model that plays the user; swap in a real one
     MyBot(),  # the companion under test
+    user_model=FakeProvider(),  # the model that plays the user; swap in a real one
     days=3,
     turns_per_day=4,
     rng_seed=7,
