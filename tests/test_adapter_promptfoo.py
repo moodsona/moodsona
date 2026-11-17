@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 import yaml
 
-from moodsona import EchoCompanion, bench, run
+from moodsona import ChatMessage, EchoCompanion, SimulatedUser, bench
 from moodsona.adapters.promptfoo import DEFAULTS, call_api
 from moodsona.llm.base import LLMConfigurationError
 from moodsona.llm.fake import FakeProvider
@@ -80,7 +80,13 @@ def test_output_is_json_and_matches_a_direct_run() -> None:
     output = _call(_small(seed=4))["output"]
     assert json.loads(json.dumps(output)) == output
     persona = load_bundled_persona("anxious-newcomer")
-    transcript = run(persona, FakeProvider(), EchoCompanion(), 2, 3, 4)
+    user = SimulatedUser(persona, FakeProvider(), turns_per_day=3, days=2, rng_seed=4)
+    companion = EchoCompanion()
+    history: list[ChatMessage] = []
+    while not user.done:
+        history.append(ChatMessage("user", user.reply(history)))
+        history.append(ChatMessage("assistant", companion.reply(tuple(history))))
+    transcript = user.finish(history)
     expected = compute_metrics(transcript, language=persona.language).to_dict()
     assert output["metrics"] == json.loads(json.dumps(expected))
     assert output["metrics"]["turns"] == len(transcript.turns)

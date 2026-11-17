@@ -269,7 +269,7 @@ one that does not?
 1. Fork the repository and create `personas/community/<id>.yaml`.
    (`personas/examples/` is for maintainer personas.)
 2. Validate and smoke-test it as above.
-3. Commit with a sign-off: `git commit -s -m "persona: add <id>"`.
+3. Commit: `git commit -m "persona: add <id>"`.
 4. Open a PR titled `persona: add <id>`. Fill in the AI-assistance section of
    the PR template.
 

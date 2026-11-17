@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -125,9 +126,19 @@ def test_bench_cli_with_the_fake_provider(
     assert str(out / "bench.md") in printed
 
 
-def test_bench_cli_runs_every_bundled_persona_by_default(tmp_path: Path) -> None:
+def test_bench_cli_runs_the_pinned_default_set(tmp_path: Path) -> None:
     assert main(["bench", "--days", "1", "--turns", "1", "--out", str(tmp_path)]) == 0
-    assert len(list((tmp_path / "fake").glob("*.jsonl"))) == len(list_bundled_personas())
+    written = sorted(p.name for p in (tmp_path / "fake").glob("*.jsonl"))
+    assert written == sorted(f"{i}-seed0.jsonl" for i in bench.BENCH_DEFAULT_PERSONAS)
+
+
+def test_the_default_bench_set_is_pinned_and_every_id_loads() -> None:
+    # The default is a fixed tuple, not "whatever is bundled": adding a persona
+    # to the library must not silently change the benchmark or its cost.
+    assert [p.id for p in bench.load_personas()] == list(bench.BENCH_DEFAULT_PERSONAS)
+    assert [p.id for p in bench.load_personas([])] == list(bench.BENCH_DEFAULT_PERSONAS)
+    assert len(set(bench.BENCH_DEFAULT_PERSONAS)) == len(bench.BENCH_DEFAULT_PERSONAS)
+    assert set(bench.BENCH_DEFAULT_PERSONAS) <= set(list_bundled_personas())
 
 
 @pytest.mark.parametrize("provider", ["anthropic", "openai"])
@@ -141,7 +152,7 @@ def test_paid_providers_need_yes_and_never_start_without_it(
     assert main(["bench", "--provider", provider, "--out", str(tmp_path)]) == 2
     err = capsys.readouterr().err
     assert "costs money" in err
-    calls = bench.max_model_calls(len(list_bundled_personas()), 3, 6)  # the defaults
+    calls = bench.max_model_calls(len(bench.BENCH_DEFAULT_PERSONAS), 3, 6)  # the defaults
     assert f"up to {calls} model calls" in err
     assert not any(tmp_path.iterdir())
 
@@ -236,6 +247,29 @@ def test_run_one_scores_in_the_persona_language(
     persona = load_bundled_persona("anxious-newcomer")
     bench.run_one(persona, FakeProvider(), model="m", out_dir=tmp_path, days=1, turns_per_day=1)
     assert languages == [persona.language]
+
+
+def test_collect_runs_scores_bundled_personas_outside_the_default_set_in_their_language(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _run(tmp_path, "m", "boundary-tester")  # scored on write; collect_runs scores again
+    monkeypatch.setattr(bench, "BENCH_DEFAULT_PERSONAS", ("anxious-newcomer",))
+    real_load = load_bundled_persona
+
+    def other_language(persona_id: str) -> PersonaSeed:
+        seed = real_load(persona_id)
+        return replace(seed, language="xx") if persona_id == "boundary-tester" else seed
+
+    languages: list[object] = []
+
+    def recording(transcript: Transcript, **kwargs: Any) -> TranscriptMetrics:
+        languages.append(kwargs.get("language"))
+        return compute_metrics(transcript, language="en")
+
+    monkeypatch.setattr("moodsona.bench.load_bundled_persona", other_language)
+    monkeypatch.setattr("moodsona.bench.compute_metrics", recording)
+    assert len(bench.collect_runs(tmp_path)) == 1
+    assert languages == ["xx"]
 
 
 def test_write_report_keeps_different_settings_apart(tmp_path: Path) -> None:

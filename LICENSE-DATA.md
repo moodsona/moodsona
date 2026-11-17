@@ -28,7 +28,7 @@ to the repository and the license.
 ## Contributions
 
 By opening a pull request that adds or changes a file covered above, you agree
-that your contribution is licensed under CC BY 4.0 (and certify the Developer
-Certificate of Origin, see [`CONTRIBUTING.md`](CONTRIBUTING.md)).
+that your contribution is licensed under CC BY 4.0 (see
+[`CONTRIBUTING.md`](CONTRIBUTING.md)).
 
 The full legal code is at https://creativecommons.org/licenses/by/4.0/legalcode.

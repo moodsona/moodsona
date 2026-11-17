@@ -80,7 +80,7 @@ def _parser() -> argparse.ArgumentParser:
     bench_cmd.add_argument(
         "--persona",
         action="append",
-        help="bundled persona id; repeat for several (default: all bundled personas)",
+        help="bundled persona id; repeat for several (default: the pinned bench set)",
     )
     bench_cmd.add_argument("--days", type=_positive, default=3, help="simulated days (default: 3)")
     bench_cmd.add_argument("--turns", type=_positive, default=6, help="turns per day (default: 6)")

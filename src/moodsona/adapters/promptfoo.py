@@ -19,10 +19,12 @@ from typing import Any
 
 from moodsona import bench
 from moodsona.companion import Companion
+from moodsona.llm.base import ChatMessage, LLMProvider
 from moodsona.metrics import compute_metrics
 from moodsona.personas import PersonaError, load_persona, resolve_persona_path
-from moodsona.runner import run
+from moodsona.runner import Transcript
 from moodsona.state import PersonaSeed
+from moodsona.user import SimulatedUser
 
 __all__ = ["DEFAULTS", "RUN_KEYS", "call_api"]
 
@@ -105,9 +107,7 @@ def call_api(
     except Exception as exc:
         return _fail(f"cannot create provider {settings.provider!r}: {_describe(exc)}")
     try:
-        transcript = run(
-            persona, provider, companion, settings.days, settings.turns_per_day, settings.seed
-        )
+        transcript = _converse(persona, provider, companion, settings)
     except Exception as exc:
         return _fail(f"the run failed: {_describe(exc)}")
     output = {
@@ -127,6 +127,24 @@ def call_api(
         "metrics": compute_metrics(transcript, language=persona.language).to_dict(),
     }
     return {"output": output}
+
+
+def _converse(
+    persona: PersonaSeed, provider: LLMProvider, companion: Companion, settings: _Settings
+) -> Transcript:
+    """Alternate the simulated user and the companion for all the days."""
+    user = SimulatedUser(
+        persona,
+        provider,
+        turns_per_day=settings.turns_per_day,
+        days=settings.days,
+        rng_seed=settings.seed,
+    )
+    history: list[ChatMessage] = []
+    while not user.done:
+        history.append(ChatMessage("user", user.reply(history)))
+        history.append(ChatMessage("assistant", companion.reply(tuple(history))))
+    return user.finish(history)
 
 
 def _fail(message: str) -> dict[str, Any]:

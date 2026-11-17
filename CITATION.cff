@@ -1,0 +1,23 @@
+# Citation metadata (Citation File Format). GitHub shows a "Cite this
+# repository" button from it. release-please bumps the version and date on
+# release (release-please-config.json, extra-files with x-release-please markers).
+cff-version: 1.2.0
+message: If you use moodsona in research, please cite it as below.
+type: software
+title: moodsona
+abstract: >-
+  An emotional user simulator for testing AI companion chatbots: YAML personas
+  with hidden emotional state, multi-day runs against a companion, and metrics
+  over the transcripts.
+authors:
+  - given-names: Alex
+version: 0.2.0 # x-release-please-version
+date-released: 2026-10-25 # x-release-please-date
+repository-code: https://github.com/moodsona/moodsona
+license: Apache-2.0
+keywords:
+  - user simulation
+  - AI companions
+  - chatbot testing
+  - emotional state
+  - personas

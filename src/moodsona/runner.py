@@ -4,13 +4,13 @@ Per day: the persona writes, the companion replies, until the persona ends the
 day (``end_day`` / ``skip_tomorrow``) or ``turns_per_day`` is reached. Then the
 persona writes its private notes for the next day. A day the persona decided
 to skip has no messages at all. Nothing is stored except the returned
-:class:`Transcript`.
+:class:`Transcript`. The persona's side of the loop is a
+:class:`~moodsona.user.SimulatedUser`, usable in other harnesses too.
 """
 
 from __future__ import annotations
 
 import json
-import random
 from dataclasses import dataclass, field
 from os import PathLike
 from pathlib import Path
@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from moodsona.companion import Companion
 from moodsona.llm.base import ChatMessage, LLMProvider
-from moodsona.simulator import SafetyHook, Simulator, SimulatorConfig
+from moodsona.simulator import SafetyHook, SimulatorConfig
 from moodsona.state import DayNote, Mood, PersonaSeed, Stance
 
 if TYPE_CHECKING:
@@ -286,48 +286,21 @@ def run(
     """
     if days < 1 or turns_per_day < 1:
         raise ValueError("days and turns_per_day must be at least 1")
-    simulator = Simulator(
+    # Imported here: moodsona.user builds on this module's Transcript and TurnRecord.
+    from moodsona.user import SimulatedUser
+
+    user = SimulatedUser(
         seed,
         provider,
+        turns_per_day=turns_per_day,
+        days=days,
+        rng_seed=rng_seed,
         language=language,
         safety_hook=safety_hook,
         config=config,
-        rng=random.Random(rng_seed),  # noqa: S311 - simulation, not cryptography
-    )
-    transcript = Transcript(
-        persona_id=seed.id, rng_seed=rng_seed, days=days, turns_per_day=turns_per_day
     )
     history: list[ChatMessage] = []
-    for day in range(1, days + 1):
-        if simulator.is_skipped(day):
-            transcript.skipped_days.append(day)
-            continue
-        simulator.start_day(day)
-        today: list[ChatMessage] = []
-        for turn_in_day in range(1, turns_per_day + 1):
-            turn = simulator.next_turn(today, day=day, turn_in_day=turn_in_day)
-            user = ChatMessage("user", turn.text)
-            history.append(user)
-            reply = companion.reply(tuple(history))
-            answer = ChatMessage("assistant", reply)
-            history.append(answer)
-            today += [user, answer]
-            transcript.turns.append(
-                TurnRecord(
-                    day=day,
-                    turn=turn_in_day,
-                    hidden=turn.hidden.as_dict() if turn.hidden else None,
-                    visible=turn.text,
-                    companion_reply=reply,
-                    mood=simulator.state.mood,
-                    polluted=turn.polluted,
-                    problems=turn.problems,
-                    forced=turn.forced,
-                )
-            )
-            if turn.ends_day:
-                break
-        note = simulator.end_day(today, day=day)
-        if note is not None:
-            transcript.notes.append(note)
-    return transcript
+    while not user.done:
+        history.append(ChatMessage("user", user.reply(history)))
+        history.append(ChatMessage("assistant", companion.reply(tuple(history))))
+    return user.finish(history)

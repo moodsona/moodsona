@@ -36,6 +36,7 @@ from moodsona.state import (
     ReactionRule,
     Stance,
 )
+from moodsona.user import SimulatedUser
 from moodsona.version import __version__
 
 __all__ = [
@@ -59,6 +60,7 @@ __all__ = [
     "SafetyHook",
     "ScriptExhaustedError",
     "ScriptedCompanion",
+    "SimulatedUser",
     "Simulator",
     "SimulatorConfig",
     "SimulatorTurn",
