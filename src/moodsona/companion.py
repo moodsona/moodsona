@@ -3,8 +3,9 @@
 Wrap your chatbot in a class with one method, ``reply(history) -> str``. The
 history holds every visible message so far, across all simulated days:
 ``user`` messages come from the simulated person, ``assistant`` messages are
-your companion's earlier replies. Nothing hidden (inner thoughts, state, notes)
-is ever in it.
+your companion's earlier replies. Each message's ``day`` is the simulated day
+it belongs to, so a companion with its own memory can tell when a new day
+starts. Nothing hidden (inner thoughts, state, notes) is ever in it.
 """
 
 from __future__ import annotations

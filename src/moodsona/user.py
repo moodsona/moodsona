@@ -11,14 +11,16 @@ notes) stays inside and ends up in the :class:`~moodsona.runner.Transcript`.
     user = SimulatedUser(persona, provider, turns_per_day=4, days=3)
     history = []
     while not user.done:
-        history.append(ChatMessage("user", user.reply(history)))
-        history.append(ChatMessage("assistant", companion.reply(tuple(history))))
+        history.append(ChatMessage("user", user.reply(history), day=user.day))
+        history.append(ChatMessage("assistant", companion.reply(tuple(history)), day=user.day))
     transcript = user.finish(history)
 
 Days: the first reply starts day 1. A day ends after a turn whose intent ends
 it (``end_day`` / ``skip_tomorrow``) or after ``turns_per_day`` turns. The next
 reply then writes that day's notes and starts the next day the persona writes
-on; a day it chose to skip has no messages.
+on; a day it chose to skip has no messages. :attr:`SimulatedUser.day` after a
+reply is the day that message belongs to; tag the messages with it, as above,
+so the companion can tell the days apart. The persona ignores the tags.
 """
 
 from __future__ import annotations

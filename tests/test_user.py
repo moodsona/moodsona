@@ -114,12 +114,18 @@ def talk(
 
 
 def openai_loop(user: SimulatedUser, companion: Companion) -> Transcript:
-    """Drive ``user`` the way an eval harness does, with OpenAI-style messages."""
+    """Drive ``user`` the way an eval harness does, with OpenAI-style messages.
+
+    Each message also carries a ``day`` key, which the simulated user ignores
+    and the companion gets as :attr:`ChatMessage.day`, as from run().
+    """
     history: list[Message] = []
     while not user.done:
-        history.append(said(user.reply(history)))
-        bot = companion.reply(tuple(ChatMessage(m["role"], m["content"]) for m in history))
-        history.append(say(bot))
+        history.append({**said(user.reply(history)), "day": user.day})
+        bot = companion.reply(
+            tuple(ChatMessage(m["role"], m["content"], m["day"]) for m in history)
+        )
+        history.append({**say(bot), "day": user.day})
     return user.finish(history)
 
 
@@ -131,7 +137,7 @@ def reference_run(
     turns_per_day: int,
     rng_seed: int = 0,
 ) -> Transcript:
-    """run() as it was before it was built on SimulatedUser: the oracle for identical behaviour."""
+    """run() before it was built on SimulatedUser, plus day tags: the oracle for run()."""
     simulator = Simulator(seed, provider, rng=random.Random(rng_seed))
     transcript = Transcript(seed.id, rng_seed, days=days, turns_per_day=turns_per_day)
     history: list[ChatMessage] = []
@@ -143,10 +149,10 @@ def reference_run(
         today: list[ChatMessage] = []
         for turn_in_day in range(1, turns_per_day + 1):
             turn = simulator.next_turn(today, day=day, turn_in_day=turn_in_day)
-            user = ChatMessage("user", turn.text)
+            user = ChatMessage("user", turn.text, day=day)
             history.append(user)
             reply = companion.reply(tuple(history))
-            answer = ChatMessage("assistant", reply)
+            answer = ChatMessage("assistant", reply, day=day)
             history.append(answer)
             today += [user, answer]
             transcript.turns.append(

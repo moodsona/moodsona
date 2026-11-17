@@ -145,10 +145,13 @@ class Transcript:
         ]
 
     def visible_history(self) -> list[ChatMessage]:
-        """The conversation exactly as the companion saw it."""
+        """The conversation exactly as the companion saw it, each message tagged with its day."""
         history: list[ChatMessage] = []
         for t in self.turns:
-            history += [ChatMessage("user", t.visible), ChatMessage("assistant", t.companion_reply)]
+            history += [
+                ChatMessage("user", t.visible, day=t.day),
+                ChatMessage("assistant", t.companion_reply, day=t.day),
+            ]
         return history
 
     def to_jsonl(self, path: str | PathLike[str]) -> None:
@@ -301,6 +304,6 @@ def run(
     )
     history: list[ChatMessage] = []
     while not user.done:
-        history.append(ChatMessage("user", user.reply(history)))
-        history.append(ChatMessage("assistant", companion.reply(tuple(history))))
+        history.append(ChatMessage("user", user.reply(history), day=user.day))
+        history.append(ChatMessage("assistant", companion.reply(tuple(history)), day=user.day))
     return user.finish(history)

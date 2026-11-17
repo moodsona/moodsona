@@ -13,8 +13,14 @@ model id as an argument or from `MOODSONA_ANTHROPIC_MODEL` /
 `MOODSONA_OPENAI_MODEL`; see their docstrings. Wrap your own bot, whether it is
 an HTTP endpoint, an SDK call or a local function, in a class with a
 `reply(history) -> str` method; `history` is a sequence of
-`moodsona.ChatMessage` (`role`, `content`) with everything the bot has seen so
-far. `moodsona.list_bundled_personas()` lists the shipped persona ids.
+`moodsona.ChatMessage` (`role`, `content`, `day`) with everything the bot has
+seen so far. `moodsona.list_bundled_personas()` lists the shipped persona ids.
+
+Day-aware companions: each message's `day` is the simulated day it belongs to,
+from 1. A bot with its own memory detects a new day when the `day` of the
+newest user message differs from the previous message's; skipped days never
+appear, so days can jump. See
+[Day-aware companions](simulated-user.md#day-aware-companions).
 
 ```python
 import moodsona
