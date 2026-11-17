@@ -6,6 +6,8 @@ a quickstart.
 
 - [Usage guide](usage.md): real model providers, the CLI, metrics and
   `moodsona report`, the benchmark scaffold, the experimental fidelity check.
+- [SimulatedUser](simulated-user.md): a persona with the same `reply(history)`
+  method as a companion, for openevals, langwatch/scenario or your own loop.
 - [Method](METHOD.md): how the simulator works (hidden state, the turn loop,
   day memory), how it relates to prior research, limitations and ethical notes.
 - [Writing a persona](personas.md): field-by-field guide to the persona

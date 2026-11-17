@@ -176,6 +176,8 @@ your own persona, see [docs/personas.md](docs/personas.md).
 ## Documentation
 
 - [Usage guide](docs/usage.md): providers, CLI, metrics, benchmark, fidelity check.
+- [SimulatedUser](docs/simulated-user.md): plug a persona into openevals,
+  langwatch/scenario or your own eval loop.
 - [Method](docs/METHOD.md): how the simulator works, limitations, ethical notes.
 - [Writing a persona](docs/personas.md) and [persona ideas](docs/persona-ideas.md).
 
