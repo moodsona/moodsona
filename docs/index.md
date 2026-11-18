@@ -13,6 +13,8 @@ a quickstart.
 - [Writing a persona](personas.md): field-by-field guide to the persona
   format, how to design reaction rules, how to test and submit a persona.
 - [Persona ideas](persona-ideas.md): short briefs to turn into a first persona.
+- [Validation study](validation-study.md): what a small 75-run study showed the
+  library can and cannot detect, and how many repeats to use.
 - [Contributing](../CONTRIBUTING.md): development setup, commit rules,
   licensing of contributions, AI-assisted contributions.
 

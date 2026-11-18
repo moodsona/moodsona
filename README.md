@@ -181,6 +181,7 @@ your own persona, see [docs/personas.md](docs/personas.md).
   langwatch/scenario or your own eval loop.
 - [Method](docs/METHOD.md): how the simulator works, limitations, ethical notes.
 - [Writing a persona](docs/personas.md) and [persona ideas](docs/persona-ideas.md).
+- [Validation study](docs/validation-study.md): what a 75-run study showed the library can and cannot detect.
 
 ## Roadmap
 
