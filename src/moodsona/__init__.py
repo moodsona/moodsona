@@ -5,7 +5,7 @@ Quick start (offline)::
     from moodsona import EchoCompanion, FakeProvider, load_bundled_persona, run
 
     persona = load_bundled_persona("anxious-newcomer")
-    transcript = run(persona, FakeProvider(), EchoCompanion(), days=2, turns_per_day=3)
+    transcript = run(persona, EchoCompanion(), user_model=FakeProvider(), days=2, turns_per_day=3)
     for point in transcript.trajectory():
         print(point)
 
@@ -36,6 +36,7 @@ from moodsona.state import (
     ReactionRule,
     Stance,
 )
+from moodsona.user import SimulatedUser
 from moodsona.version import __version__
 
 __all__ = [
@@ -59,6 +60,7 @@ __all__ = [
     "SafetyHook",
     "ScriptExhaustedError",
     "ScriptedCompanion",
+    "SimulatedUser",
     "Simulator",
     "SimulatorConfig",
     "SimulatorTurn",
