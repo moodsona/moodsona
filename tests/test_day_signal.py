@@ -57,7 +57,7 @@ def scheduled(intents: Mapping[tuple[int, int], str]) -> Any:
 
 def simulate(provider: LLMProvider, companion: Companion, days: int, turns: int) -> Transcript:
     """The one call of run() in this file, so a change of its signature is one line."""
-    return run(make_seed(), provider, companion, days=days, turns_per_day=turns)
+    return run(make_seed(), companion, user_model=provider, days=days, turns_per_day=turns)
 
 
 def assert_days_are_consistent(history: Sequence[ChatMessage], transcript: Transcript) -> None:
