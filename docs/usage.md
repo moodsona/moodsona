@@ -49,6 +49,19 @@ optional typing noise) use the persona's `language` profile by default; pass
 finer control (step by step, custom stopping), use `moodsona.Simulator`
 directly.
 
+A reaction rule that fires again on the same day counts for less: the k-th
+time, its emotion and energy deltas are multiplied by
+`SimulatorConfig.rule_repeat_decay ** (k - 1)` (0.5 by default) and rounded
+toward zero; once a delta has decayed to 0, the model's own capped move
+applies to that dimension again. The count starts again the next day. Pass
+`config=moodsona.SimulatorConfig(rule_repeat_decay=1.0)` to apply the full
+deltas every time, as earlier versions did. That restores the state
+arithmetic only: the same release tightened the prompt's instruction on when
+to report a rule, so runs with a real user model are not one-to-one
+comparable with runs from earlier versions. Each turn line of the JSONL
+records the rules applied and the deltas actually added (`rules_applied`);
+see [METHOD.md](METHOD.md#the-turn-loop).
+
 ## CLI
 
 ```bash

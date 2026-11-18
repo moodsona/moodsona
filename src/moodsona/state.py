@@ -14,18 +14,28 @@ Who decides what:
   covers, the model's proposal is used, but it may move at most
   ``max_free_step`` points per turn. Stance changes only through a rule's
   ``stance_to`` (the last triggered rule wins) or through the end-of-day notes.
+* A rule that fires again on the same day counts for less: the k-th time,
+  its emotion and energy deltas are multiplied by ``decay ** (k - 1)`` and
+  rounded toward zero (:func:`repeat_delta`); its ``stance_to`` applies in
+  full. The count starts again each day. Once a non-zero delta has decayed
+  to 0 the rule no longer decides that dimension, and the model's capped
+  move applies as above; a delta written as 0 always holds the dimension.
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from typing import Any
 
 SCORE_MIN = 0
 SCORE_MAX = 100
 #: Largest change of emotion or energy in one turn that no reaction rule covers.
 MAX_FREE_STEP = 20
+#: Factor applied to a rule's deltas each further time it fires on the same day.
+DEFAULT_RULE_REPEAT_DECAY = 0.5
 #: Default spread of the morning energy around the baseline (+/- points).
 DEFAULT_OVERNIGHT_JITTER = 10
 
@@ -143,6 +153,81 @@ class ReactionRule:
     stance_to: Stance | None = None
 
 
+def repeat_delta(delta: int, *, repeat: int, decay: float) -> int:
+    """A rule's delta the ``repeat``-th time it fires on one day.
+
+    The delta is multiplied by ``decay ** (repeat - 1)`` and rounded toward
+    zero, so with ``decay=0.5`` a +10 rule gives +10, +5, +2, +1, then 0.
+    ``decay=1.0`` keeps the full delta every time.
+
+    Args:
+        delta: The rule's delta as written in the persona.
+        repeat: How often the rule has fired today, this time included (from 1).
+        decay: Factor per repeat, in [0, 1].
+
+    Returns:
+        The delta to apply.
+
+    Raises:
+        ValueError: ``repeat`` is below 1 or ``decay`` is outside [0, 1].
+    """
+    if repeat < 1:
+        raise ValueError(f"repeat must be at least 1, got {repeat}")
+    if not 0.0 <= decay <= 1.0:
+        raise ValueError(f"decay must be in [0, 1], got {decay}")
+    # round(..., 9) first: float noise must not cost a point (10 * 0.7 is 7, not 6.999...).
+    return math.trunc(round(delta * decay ** (repeat - 1), 9))
+
+
+def repeated_rule(rule: ReactionRule, *, repeat: int, decay: float) -> ReactionRule:
+    """``rule`` as it applies the ``repeat``-th time today (see :func:`repeat_delta`).
+
+    A non-zero delta that has decayed to 0 becomes None: the rule no longer
+    decides that dimension, and the model's own capped move applies. A delta
+    the rule does not have stays None, an authored 0 stays 0 (it holds the
+    dimension), and ``stance_to`` is unchanged.
+    """
+
+    def scaled(delta: int | None) -> int | None:
+        if delta is None:
+            return None
+        applied = repeat_delta(delta, repeat=repeat, decay=decay)
+        return None if applied == 0 and delta != 0 else applied
+
+    return replace(
+        rule, emotion_delta=scaled(rule.emotion_delta), energy_delta=scaled(rule.energy_delta)
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class AppliedRule:
+    """One reaction rule as the code applied it on one turn.
+
+    Attributes:
+        rule: The 1-based rule number.
+        repeat: How often the rule has fired today, this time included.
+        emotion_delta: The emotion delta actually applied. None: the rule did
+            not decide emotion on this turn (it has no emotion delta, or it
+            has decayed to 0), so the model's capped move applied. 0: the
+            rule's delta is written as 0 and held emotion where it was.
+        energy_delta: The same for energy.
+    """
+
+    rule: int
+    repeat: int
+    emotion_delta: int | None
+    energy_delta: int | None
+
+    def as_dict(self) -> dict[str, Any]:
+        """JSON-ready form."""
+        return {
+            "rule": self.rule,
+            "repeat": self.repeat,
+            "emotion_delta": self.emotion_delta,
+            "energy_delta": self.energy_delta,
+        }
+
+
 @dataclass(frozen=True, slots=True)
 class PersonaSeed:
     """Everything fixed about one persona, built from a persona file.
@@ -244,13 +329,18 @@ class DayNote:
 
 @dataclass
 class PersonaState:
-    """What changes during a simulation: mood, day bookkeeping and memory log."""
+    """What changes during a simulation: mood, day bookkeeping and memory log.
+
+    ``rule_uses`` counts how often each rule number has fired today; it is
+    emptied when a new day begins.
+    """
 
     mood: Mood
     current_day: int = 0
     last_active_day: int = 0
     memory_log: list[DayNote] = field(default_factory=list)
     skipped_days: set[int] = field(default_factory=set)
+    rule_uses: dict[int, int] = field(default_factory=dict)
 
     @classmethod
     def initial(cls, seed: PersonaSeed) -> PersonaState:
@@ -260,7 +350,8 @@ class PersonaState:
     def begin_day(self, seed: PersonaSeed, *, day: int, energy_offset: int = 0) -> None:
         """Apply the overnight rule once per day, before the day's first message.
 
-        The first active day starts from the initial state unchanged.
+        The first active day starts from the initial state unchanged. A new
+        day also starts the rule counts (:meth:`use_rule`) again.
         """
         if day <= self.current_day:
             return
@@ -272,6 +363,13 @@ class PersonaState:
                 remembers=seed.memory_days_visible > 0,
             )
         self.current_day = day
+        self.rule_uses.clear()
+
+    def use_rule(self, number: int) -> int:
+        """Count one firing of rule ``number`` today; return today's count, this one included."""
+        count = self.rule_uses.get(number, 0) + 1
+        self.rule_uses[number] = count
+        return count
 
     def days_since_last_talk(self, day: int) -> int | None:
         """Days since the last day with a message, or None before the first one."""

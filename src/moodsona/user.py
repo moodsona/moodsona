@@ -109,6 +109,7 @@ def _open_record(turn: SimulatorTurn, *, day: int, turn_in_day: int, mood: Mood)
         polluted=turn.polluted,
         problems=turn.problems,
         forced=turn.forced,
+        rules_applied=turn.rules_applied,
     )
 
 

@@ -27,6 +27,7 @@ from moodsona.personas import (
 from moodsona.runner import TrajectoryPoint, Transcript, TurnRecord, run
 from moodsona.simulator import SafetyHook, Simulator, SimulatorConfig, SimulatorTurn
 from moodsona.state import (
+    AppliedRule,
     DayNote,
     Intent,
     Mood,
@@ -40,6 +41,7 @@ from moodsona.user import SimulatedUser
 from moodsona.version import __version__
 
 __all__ = [
+    "AppliedRule",
     "ChatMessage",
     "Companion",
     "DayNote",

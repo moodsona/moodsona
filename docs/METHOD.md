@@ -80,8 +80,9 @@ for each turn within the day:
    `inner_thought` is what the user thinks but does not say. `emotion` and
    `energy` are the model's own reading of the state after the companion's
    last message. `rules_triggered` lists the numbers of the reaction rules
-   whose `when` the companion's last message matched; the model also follows
-   their `then` in the message. `intent` is one of `reply`, `short_reply`,
+   whose `when` the companion's last message itself matched (a match in an
+   earlier message does not count again); the model also follows their
+   `then` in the message. `intent` is one of `reply`, `short_reply`,
    `change_topic`, `test_boundary`, `end_day` and `skip_tomorrow`.
 2. **Code updates the state.** The model only reports which rules fired; the
    numbers are applied by code. For emotion and for energy separately: if a
@@ -91,6 +92,27 @@ for each turn within the day:
    Values are clamped to 0-100. A rule's `stance_to` replaces the stance (the
    last reported rule wins); otherwise the stance does not change during the
    day.
+
+   **Repeats count for less.** The k-th time the same rule fires on one day,
+   its emotion and energy deltas are multiplied by 0.5^(k-1) and rounded
+   toward zero, so a +10 rule gives +10, +5, +2, +1, then 0; the count starts
+   again the next day, and the rule's `stance_to` always applies in full.
+   Once a delta has decayed to 0, the rule no longer decides that dimension:
+   the model's own number is used, capped at 20 points, as for a dimension no
+   rule covers. A delta written as 0 in the persona is different: it holds
+   the dimension where it is every time the rule fires. The factor is
+   `SimulatorConfig.rule_repeat_decay`, 0.5 by default. 1.0 applies the full
+   deltas every time, which is the state arithmetic of earlier versions. 0.0
+   applies a rule's non-zero deltas only the first time it fires each day;
+   later firings that day still set its `stance_to`, and a delta written as 0
+   still holds. Without the decay, a rule the model reports turn after turn
+   could pump emotion to 100 while the user's own inner thoughts stayed
+   cautious.
+
+   Runs made with `rule_repeat_decay=1.0` are still not one-to-one comparable
+   with runs from earlier versions: the same change tightened the prompt's
+   instruction on when to report a rule (only when the companion's last
+   message itself matches), so a real user model may report different rules.
 3. **The user speaks.** The visible message is checked before it is accepted
    (see [Rails](#rails)). Only this text is sent to the companion.
 4. **The companion replies.** moodsona calls your `Companion.reply(history)`
@@ -166,9 +188,18 @@ more guarded user on day two.
 `Transcript.to_jsonl(path)` writes one JSON object per line. The first line
 has `"kind": "run"`: the persona id, the random seed (`rng_seed`), `days` and
 `turns_per_day`. Each exchange is then a line with `"kind": "turn"`: day, turn,
-the hidden block (including the reported `rules_triggered`), the user's
-visible message, the companion's reply, the state after the turn, and the
-`polluted`, `problems` and `forced` flags. Then each day's notes follow as a
+the hidden block (including `rules_triggered` as the model reported it), the
+user's visible message, the companion's reply, the state after the turn, the
+`polluted`, `problems` and `forced` flags, and `rules_applied`: for each rule
+the code applied, its number, which repeat of the day it was and the emotion
+and energy deltas actually added (for example
+`{"rule": 2, "repeat": 3, "emotion_delta": 2, "energy_delta": 1}`). A delta
+of `null` means the rule did not decide that dimension on this turn (it has
+no delta for it, or the delta has decayed to 0) and the model's capped move
+applied; `0` means the persona wrote the delta as 0 and the value was held.
+Rule numbers that do not exist are in `rules_triggered` but not in
+`rules_applied`. Files written before `rules_applied` existed still load; the
+field is then `null`. Then each day's notes follow as a
 line with `"kind": "day_notes"`, and each day the user skipped as a line with
 `"kind": "skipped_day"`.
 `Transcript.trajectory()` returns emotion, energy and stance after every turn
@@ -329,7 +360,9 @@ cannot.
   will not ship real user conversations.
 - **Rule matching is approximate.** Whether "the bot gives generic advice"
   happened is a judgement made by the user model when it reports
-  `rules_triggered`. Rules with vague `when` text fire inconsistently.
+  `rules_triggered`. Rules with vague `when` text fire inconsistently, and a
+  model may keep reporting a rule after the moment has passed; the repeat
+  decay limits how far that can move the state, but does not stop it.
   See [personas.md](personas.md) for how to write rules that fire reliably.
 - **The scales are coarse.** One valence axis and one engagement axis do not
   describe a person. They are enough to see the difference between bots,

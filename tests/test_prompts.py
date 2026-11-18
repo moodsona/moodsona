@@ -50,6 +50,12 @@ def test_prompts_carry_no_hard_coded_gender_or_hobby() -> None:
         assert "S0" not in prompt
 
 
+def test_turn_prompt_ties_rules_to_the_last_message_only() -> None:
+    prompt = " ".join(turn_system_prompt(Pronouns.from_label("they/them"), "en").split())
+    assert 'only when the companion\'s last message itself does what its "when" says' in prompt
+    assert "an earlier message does not count" in prompt
+
+
 def test_notes_prompt() -> None:
     prompt = notes_system_prompt(Pronouns.from_label("she/her"), "en")
     assert prompt.startswith(NOTES_MARKER)

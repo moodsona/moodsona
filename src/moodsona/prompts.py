@@ -65,7 +65,9 @@ Update rules:
   (or, at the start of a day, to the day so far) and say why in inner_thought. A typical step
   is 0-10 points; up to 20 when something really lands or really grates.
 - If the companion's last message matches the "when" of a reaction rule, put that rule's number
-  in rules_triggered and follow its "then" in the message. List only rules that clearly apply.
+  in rules_triggered and follow its "then" in the message. List a rule only when the companion's
+  last message itself does what its "when" says; a match in an earlier message does not count
+  again. List only rules that clearly apply.
 - Energy is not a clock. It falls when the exchange takes effort (long replies, a string of
   questions, having to explain oneself, unrequested advice) and rises when the talk is light or
   the character gets something back.

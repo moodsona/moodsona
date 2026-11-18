@@ -8,8 +8,8 @@ from moodsona.lang import EnglishProfile
 from moodsona.llm.base import ChatMessage
 from moodsona.llm.fake import FakeProvider
 from moodsona.prompts import HIDDEN_REPAIR, REPAIRS
-from moodsona.simulator import Simulator, SimulatorConfig
-from moodsona.state import Mood, Stance
+from moodsona.simulator import Simulator, SimulatorConfig, SimulatorTurn
+from moodsona.state import Mood, ReactionRule, Stance
 from support import StubProfile, block, keyword_hook, make_seed, notes
 
 
@@ -81,6 +81,140 @@ def test_triggered_rules_are_applied_by_code() -> None:
     turn = simulator.next_turn([], day=1, turn_in_day=2)
     assert turn.rules_triggered == (2,)  # 9 does not exist and is dropped
     assert simulator.state.mood == Mood(58, 65, Stance.OPEN)
+
+
+def test_a_repeated_rule_has_diminishing_returns_within_a_day() -> None:
+    # Rule 2: emotion +8, energy +5, stance open. Rule 3: stance withdrawn only.
+    replies = [block(f"line {n}", emotion=0, energy=0, rules=[2]) for n in range(5)] + [
+        block("line 5", rules=[3]),
+        block("line 6", rules=[3]),
+        block("line 7", emotion=0, energy=0, rules=[2]),
+    ]
+    simulator, _ = _sim(replies)
+    moods, applied = [], []
+    for n in range(1, 6):
+        turn = simulator.next_turn([], day=1, turn_in_day=n)
+        moods.append((simulator.state.mood.emotion, simulator.state.mood.energy))
+        applied.append(turn.rules_applied)
+    # 50/60 at the start; +8/+5, then +4/+2, +2/+1, then +1 and energy decayed to 0: the
+    # rule lets go of energy and the model's own move (to 0, capped at 20) applies; the
+    # fifth time it lets go of emotion too.
+    assert moods == [(58, 65), (62, 67), (64, 68), (65, 48), (45, 28)]
+    assert [a[0].repeat for a in applied] == [1, 2, 3, 4, 5]
+    assert [(a[0].emotion_delta, a[0].energy_delta) for a in applied] == [
+        (8, 5), (4, 2), (2, 1), (1, None), (None, None)
+    ]  # fmt: skip
+    assert all(a[0].rule == 2 for a in applied)
+    assert simulator.state.mood.stance == Stance.OPEN
+    # A stance-only rule still changes the stance in full on every repeat.
+    simulator.next_turn([], day=1, turn_in_day=6)
+    simulator.state.mood = Mood(65, 68, Stance.OPEN)
+    turn = simulator.next_turn([], day=1, turn_in_day=7)
+    assert simulator.state.mood.stance == Stance.WITHDRAWN
+    assert turn.rules_applied[0].as_dict() == {
+        "rule": 3,
+        "repeat": 2,
+        "emotion_delta": None,
+        "energy_delta": None,
+    }
+    # The count resets overnight: the first use on day 2 is in full again.
+    simulator.start_day(2)
+    before = simulator.state.mood
+    turn = simulator.next_turn([], day=2, turn_in_day=1)
+    assert turn.rules_applied[0].repeat == 1
+    assert simulator.state.mood.emotion == before.emotion + 8
+
+
+def test_rule_repeat_decay_one_keeps_the_full_delta() -> None:
+    config = SimulatorConfig(rule_repeat_decay=1.0)
+    replies = [block(f"line {n}", emotion=0, energy=0, rules=[2]) for n in range(3)]
+    simulator, _ = _sim(replies, config=config)
+    for n in (1, 2, 3):
+        simulator.next_turn([], day=1, turn_in_day=n)
+    assert simulator.state.mood == Mood(74, 75, Stance.OPEN)
+
+
+def test_an_authored_zero_delta_holds_on_every_repeat() -> None:
+    hold = ReactionRule("The companion lectures.", "Goes quiet.", energy_delta=0)
+    seed = make_seed(reaction_rules=(hold,))
+    replies = [block(f"line {n}", emotion=50, energy=0, rules=[1]) for n in range(6)]
+    simulator = Simulator(seed, FakeProvider(replies))
+    simulator.start_day(1)
+    for n in range(1, 7):
+        turn = simulator.next_turn([], day=1, turn_in_day=n)
+        assert (turn.rules_applied[0].repeat, turn.rules_applied[0].energy_delta) == (n, 0)
+    assert simulator.state.mood.energy == 60  # held, although the model asked for 0
+
+
+def test_decay_zero_applies_a_rules_deltas_only_on_the_first_firing_of_the_day() -> None:
+    config = SimulatorConfig(rule_repeat_decay=0.0)
+    replies = [block(f"line {n}", emotion=50, energy=60, rules=[2]) for n in range(3)]
+    simulator, _ = _sim(replies, config=config)
+    moods = []
+    for n in (1, 2, 3):
+        simulator.state.mood = Mood(50, 60, Stance.GUARDED)
+        turn = simulator.next_turn([], day=1, turn_in_day=n)
+        moods.append(simulator.state.mood)
+    # First firing: +8/+5. Later ones: the model's own reading (here: no change), stance open.
+    assert moods == [
+        Mood(58, 65, Stance.OPEN),
+        Mood(50, 60, Stance.OPEN),
+        Mood(50, 60, Stance.OPEN),
+    ]
+    assert (turn.rules_applied[0].emotion_delta, turn.rules_applied[0].energy_delta) == (None, None)
+
+
+def _repeats(turn: SimulatorTurn) -> list[int]:
+    return [applied.repeat for applied in turn.rules_applied]
+
+
+def test_a_polluted_turn_does_not_count_as_a_rule_use() -> None:
+    simulator, _ = _sim(
+        [
+            block("first", rules=[2]),
+            "x",  # the next turn: no attempt passes, even those naming rule 2
+            block("As an AI language model, hi", rules=[2]),
+            block("", rules=[2]),
+            block("second", rules=[2]),
+        ]
+    )
+    assert _repeats(simulator.next_turn([], day=1, turn_in_day=1)) == [1]
+    polluted = simulator.next_turn([], day=1, turn_in_day=2)
+    assert polluted.polluted
+    assert polluted.rules_applied == ()
+    assert simulator.state.rule_uses == {2: 1}
+    assert _repeats(simulator.next_turn([], day=1, turn_in_day=3)) == [2]
+
+
+def test_rejected_attempts_do_not_count_as_rule_uses() -> None:
+    simulator, provider = _sim(
+        [
+            block("As an AI language model, hi", rules=[2]),
+            "no block at all",
+            block("ok then", rules=[2]),
+            block("again", rules=[2]),
+        ]
+    )
+    turn = simulator.next_turn([], day=1, turn_in_day=1)
+    assert turn.problems == ("identity_claim", "hidden_state_invalid")
+    assert _repeats(turn) == [1]
+    assert _repeats(simulator.next_turn([], day=1, turn_in_day=2)) == [2]
+    assert len(provider.calls) == 4
+
+
+def test_a_forced_message_counts_once() -> None:
+    long = "word " * 200
+    simulator, _ = _sim([block(long, rules=[2])] * 3 + [block("short", rules=[2])])
+    turn = simulator.next_turn([], day=1, turn_in_day=1)
+    assert turn.forced == "too_long"
+    assert _repeats(turn) == [1]
+    assert _repeats(simulator.next_turn([], day=1, turn_in_day=2)) == [2]
+
+
+@pytest.mark.parametrize("bad", [-0.1, 1.01, float("nan")])
+def test_rule_repeat_decay_must_be_between_zero_and_one(bad: float) -> None:
+    with pytest.raises(ValueError, match="rule_repeat_decay"):
+        SimulatorConfig(rule_repeat_decay=bad)
 
 
 def test_free_moves_are_capped() -> None:

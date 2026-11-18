@@ -166,6 +166,7 @@ def reference_run(
                     polluted=turn.polluted,
                     problems=turn.problems,
                     forced=turn.forced,
+                    rules_applied=turn.rules_applied,
                 )
             )
             if turn.ends_day:
@@ -641,6 +642,56 @@ def test_a_failed_notes_call_leaves_the_turn_open_and_a_retry_repeats_it() -> No
     # The retries left no trace: the same run without failures.
     steady = SimulatedUser(seed, FakeProvider(script), turns_per_day=1, rng_seed=3)
     assert steady.transcript(talk(steady, ["Hm.", "Ok."])) == transcript
+
+
+def rule_two_every_turn(intents: Mapping[tuple[int, int], str] | None = None) -> Responder:
+    """Valid turns that all name rule 2, with the given intent per (day, turn)."""
+    table = dict(intents or {})
+
+    def respond(messages: Sequence[ChatMessage]) -> str:
+        if messages[0].content.startswith(NOTES_MARKER):
+            return plumbing_reply(messages)
+        payload = json.loads(messages[1].content)
+        day, turn = payload["day"], payload["turn_in_day"]
+        return block(
+            TOPICS[(turn - 1) % len(TOPICS)],
+            intent=table.get((day, turn), "reply"),
+            rules=[2],
+        )
+
+    return respond
+
+
+def repeats(transcript: Transcript) -> list[tuple[int, int, list[int]]]:
+    """(day, turn, repeat of each applied rule) for every turn."""
+    return [(t.day, t.turn, [a.repeat for a in t.rules_applied or ()]) for t in transcript.turns]
+
+
+def test_a_provider_error_and_its_retry_count_the_rule_once() -> None:
+    calls = 0
+    script = rule_two_every_turn()
+
+    def flaky(messages: Sequence[ChatMessage]) -> str:
+        nonlocal calls
+        calls += 1
+        if calls == 2:  # day 1's second turn
+            raise LLMError("timeout")
+        return script(messages)
+
+    user = SimulatedUser(make_seed(), FakeProvider(flaky), turns_per_day=3, days=1)
+    history = talk(user, ["Hm."])
+    with pytest.raises(LLMError):
+        user.reply(history)
+    assert user.state.rule_uses == {2: 1}
+    history = talk(user, ["Go on.", "Mm."], history)
+    assert repeats(user.finish(history)) == [(1, 1, [1]), (1, 2, [2]), (1, 3, [3])]
+
+
+def test_the_rule_count_restarts_on_the_first_day_after_a_skip() -> None:
+    provider = FakeProvider(rule_two_every_turn({(1, 2): "skip_tomorrow"}))
+    transcript = run(make_seed(), EchoCompanion(), user_model=provider, days=3, turns_per_day=2)
+    assert transcript.skipped_days == [2]
+    assert repeats(transcript) == [(1, 1, [1]), (1, 2, [2]), (3, 1, [1]), (3, 2, [2])]
 
 
 def test_a_failed_notes_call_in_finish_can_be_retried() -> None:
