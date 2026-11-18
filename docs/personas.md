@@ -123,9 +123,11 @@ triggered; the code then adds their deltas. For a dimension no triggered rule
 has a delta for, the model's own estimate is used instead, limited to 20
 points per turn. So a delta is the only way a single turn can move emotion or
 energy by more than 20. A rule that fires again on the same day counts for
-less: by default its deltas halve with each repeat (+10, +5, +2, +1, then 0),
-and the next day it starts at full strength again; `stance_to` always applies.
-Size a delta for the first time a rule fires in a day.
+less: by default its deltas halve with each repeat (+10, +5, +2, +1), and once
+a delta reaches 0 the user model's own estimate takes over that dimension
+again. The next day the rule starts at full strength; `stance_to` always
+applies. Size a delta for the first time a rule fires in a day. A delta of 0
+is not decayed: it holds the dimension still every time the rule fires.
 
 ```yaml
 reaction_rules:

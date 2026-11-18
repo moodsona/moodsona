@@ -173,12 +173,35 @@ def test_repeating_a_rule_keeps_the_state_in_range_and_its_stance(
 ) -> None:
     for k in range(1, times + 1):
         applied = repeated_rule(rule, repeat=k, decay=decay)
-        assert (applied.emotion_delta is None) == (rule.emotion_delta is None)
-        assert (applied.energy_delta is None) == (rule.energy_delta is None)
+        for authored, now in (
+            (rule.emotion_delta, applied.emotion_delta),
+            (rule.energy_delta, applied.energy_delta),
+        ):
+            if authored is None:
+                assert now is None
+            elif authored == 0:
+                assert now == 0  # an authored 0 always holds the scale
+            else:
+                # A non-zero delta either still moves the scale or, decayed away, releases it.
+                assert now is None or now != 0
+                assert (now is None) == (repeat_delta(authored, repeat=k, decay=decay) == 0)
         assert applied.stance_to == rule.stance_to  # the stance change always applies in full
         mood = react(mood, proposed_emotion=emotion, proposed_energy=energy, triggered=[applied])
         assert 0 <= mood.emotion <= 100
         assert 0 <= mood.energy <= 100
+
+
+def test_a_delta_decayed_to_zero_releases_the_scale_but_an_authored_zero_holds() -> None:
+    drain = ReactionRule("when x", "then y", energy_delta=-10)
+    hold = ReactionRule("when x", "then y", energy_delta=0)
+    mood = Mood(50, 50, Stance.OPEN)
+    fifth = repeated_rule(drain, repeat=5, decay=0.5)  # -10, -5, -2, -1, then 0
+    assert fifth.energy_delta is None
+    after = react(mood, proposed_emotion=50, proposed_energy=10, triggered=[fifth])
+    assert after.energy == 50 - MAX_FREE_STEP  # the model's own move, capped
+    held = repeated_rule(hold, repeat=5, decay=0.5)
+    assert held.energy_delta == 0
+    assert react(mood, proposed_emotion=50, proposed_energy=10, triggered=[held]).energy == 50
 
 
 def test_rule_uses_are_counted_per_day_and_reset_overnight() -> None:

@@ -124,8 +124,8 @@ def _applied_from_list(value: Any) -> tuple[AppliedRule, ...] | None:
         rule, repeat = item["rule"], item["repeat"]
         emotion, energy = item.get("emotion_delta"), item.get("energy_delta")
         _require(
-            _is_int(rule) and _is_int(repeat),
-            "rules_applied: rule and repeat must be integers",
+            _is_int(rule) and _is_int(repeat) and rule >= 1 and repeat >= 1,
+            "rules_applied: rule and repeat must be integers, at least 1",
         )
         _require(
             all(d is None or _is_int(d) for d in (emotion, energy)),

@@ -17,8 +17,9 @@ Who decides what:
 * A rule that fires again on the same day counts for less: the k-th time,
   its emotion and energy deltas are multiplied by ``decay ** (k - 1)`` and
   rounded toward zero (:func:`repeat_delta`); its ``stance_to`` applies in
-  full. The count starts again each day. A delta that has shrunk to 0 still
-  decides its dimension, so the value stays where it is.
+  full. The count starts again each day. Once a non-zero delta has decayed
+  to 0 the rule no longer decides that dimension, and the model's capped
+  move applies as above; a delta written as 0 always holds the dimension.
 """
 
 from __future__ import annotations
@@ -181,11 +182,17 @@ def repeat_delta(delta: int, *, repeat: int, decay: float) -> int:
 def repeated_rule(rule: ReactionRule, *, repeat: int, decay: float) -> ReactionRule:
     """``rule`` as it applies the ``repeat``-th time today (see :func:`repeat_delta`).
 
-    A delta the rule does not have stays None, and ``stance_to`` is unchanged.
+    A non-zero delta that has decayed to 0 becomes None: the rule no longer
+    decides that dimension, and the model's own capped move applies. A delta
+    the rule does not have stays None, an authored 0 stays 0 (it holds the
+    dimension), and ``stance_to`` is unchanged.
     """
 
     def scaled(delta: int | None) -> int | None:
-        return None if delta is None else repeat_delta(delta, repeat=repeat, decay=decay)
+        if delta is None:
+            return None
+        applied = repeat_delta(delta, repeat=repeat, decay=decay)
+        return None if applied == 0 and delta != 0 else applied
 
     return replace(
         rule, emotion_delta=scaled(rule.emotion_delta), energy_delta=scaled(rule.energy_delta)
@@ -199,8 +206,11 @@ class AppliedRule:
     Attributes:
         rule: The 1-based rule number.
         repeat: How often the rule has fired today, this time included.
-        emotion_delta: The emotion delta actually applied (None: the rule has none).
-        energy_delta: The energy delta actually applied (None: the rule has none).
+        emotion_delta: The emotion delta actually applied. None: the rule did
+            not decide emotion on this turn (it has no emotion delta, or it
+            has decayed to 0), so the model's capped move applied. 0: the
+            rule's delta is written as 0 and held emotion where it was.
+        energy_delta: The same for energy.
     """
 
     rule: int

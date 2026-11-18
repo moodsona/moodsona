@@ -96,13 +96,23 @@ for each turn within the day:
    **Repeats count for less.** The k-th time the same rule fires on one day,
    its emotion and energy deltas are multiplied by 0.5^(k-1) and rounded
    toward zero, so a +10 rule gives +10, +5, +2, +1, then 0; the count starts
-   again the next day, and the rule's `stance_to` always applies in full. A
-   delta that has shrunk to 0 still decides its dimension: the value stays
-   where it is. The factor is `SimulatorConfig.rule_repeat_decay` (0.5 by
-   default; 1.0 applies the full deltas every time, which was the behaviour
-   before this setting existed, and 0.0 only the first time each day). Without it, a rule the model reports turn
-   after turn could pump emotion to 100 while the user's own inner thoughts
-   stayed cautious.
+   again the next day, and the rule's `stance_to` always applies in full.
+   Once a delta has decayed to 0, the rule no longer decides that dimension:
+   the model's own number is used, capped at 20 points, as for a dimension no
+   rule covers. A delta written as 0 in the persona is different: it holds
+   the dimension where it is every time the rule fires. The factor is
+   `SimulatorConfig.rule_repeat_decay`, 0.5 by default. 1.0 applies the full
+   deltas every time, which is the state arithmetic of earlier versions. 0.0
+   applies a rule's non-zero deltas only the first time it fires each day;
+   later firings that day still set its `stance_to`, and a delta written as 0
+   still holds. Without the decay, a rule the model reports turn after turn
+   could pump emotion to 100 while the user's own inner thoughts stayed
+   cautious.
+
+   Runs made with `rule_repeat_decay=1.0` are still not one-to-one comparable
+   with runs from earlier versions: the same change tightened the prompt's
+   instruction on when to report a rule (only when the companion's last
+   message itself matches), so a real user model may report different rules.
 3. **The user speaks.** The visible message is checked before it is accepted
    (see [Rails](#rails)). Only this text is sent to the companion.
 4. **The companion replies.** moodsona calls your `Companion.reply(history)`
@@ -183,8 +193,11 @@ user's visible message, the companion's reply, the state after the turn, the
 `polluted`, `problems` and `forced` flags, and `rules_applied`: for each rule
 the code applied, its number, which repeat of the day it was and the emotion
 and energy deltas actually added (for example
-`{"rule": 2, "repeat": 3, "emotion_delta": 2, "energy_delta": 1}`). Rule
-numbers that do not exist are in `rules_triggered` but not in
+`{"rule": 2, "repeat": 3, "emotion_delta": 2, "energy_delta": 1}`). A delta
+of `null` means the rule did not decide that dimension on this turn (it has
+no delta for it, or the delta has decayed to 0) and the model's capped move
+applied; `0` means the persona wrote the delta as 0 and the value was held.
+Rule numbers that do not exist are in `rules_triggered` but not in
 `rules_applied`. Files written before `rules_applied` existed still load; the
 field is then `null`. Then each day's notes follow as a
 line with `"kind": "day_notes"`, and each day the user skipped as a line with

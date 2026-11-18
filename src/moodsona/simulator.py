@@ -92,7 +92,11 @@ class SimulatorConfig:
     language_checks: bool = True
     #: In [0, 1]. The k-th time a reaction rule fires on one day, its emotion and
     #: energy deltas are multiplied by ``rule_repeat_decay ** (k - 1)`` (rounded
-    #: toward zero). 1.0 applies the full deltas every time; 0.0 once a day.
+    #: toward zero); a non-zero delta that reaches 0 leaves that dimension to the
+    #: model's capped move. 1.0 applies the full deltas every time. 0.0 applies a
+    #: rule's non-zero deltas only the first time it fires each day; later
+    #: firings that day still set its ``stance_to``, and a delta written as 0
+    #: still holds its dimension.
     rule_repeat_decay: float = DEFAULT_RULE_REPEAT_DECAY
 
     def __post_init__(self) -> None:

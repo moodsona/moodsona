@@ -126,6 +126,8 @@ def test_from_jsonl_rejects_broken_files(tmp_path: Path, text: str, message: str
         ({"rules_applied": {"rule": 1}}, "rules_applied must be a list"),
         ({"rules_applied": [{"rule": "1", "repeat": 1}]}, "rules_applied"),
         ({"rules_applied": [{"repeat": 1}]}, "rule"),
+        ({"rules_applied": [{"rule": 0, "repeat": 1}]}, "at least 1"),
+        ({"rules_applied": [{"rule": 1, "repeat": 0}]}, "at least 1"),
     ],
 )
 def test_from_jsonl_checks_field_types(
