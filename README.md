@@ -31,8 +31,9 @@ Status: alpha (v0.2). English only. The API may change before 1.0.
   day it comes back remembering what your bot did (or does not come back).
 - **Explicit, testable state.** Emotion and energy are numbers from 0 to 100,
   and stance is one of six named values. When a reaction rule fires, the model
-  playing the user only names it; plain code applies the rule's deltas, caps
-  every other move per turn and clamps to 0-100. You can plot the state, diff
+  playing the user only names it; plain code applies the rule's deltas (with
+  diminishing returns when the same rule fires again that day), caps every
+  other move per turn and clamps to 0-100. You can plot the state, diff
   two bots on the same persona and seed, or assert on it in a test.
 - **Personas are data.** One YAML file per persona, checked against a JSON
   Schema. Writing one needs no Python.

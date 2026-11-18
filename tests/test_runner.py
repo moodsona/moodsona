@@ -111,6 +111,47 @@ def test_polluted_turns_are_recorded() -> None:
     assert record.as_dict()["hidden"] is None
 
 
+def test_the_record_shows_the_rules_named_and_the_deltas_applied(tmp_path: Path) -> None:
+    provider = FakeProvider(
+        [
+            block("first", emotion=0, energy=0, rules=[2, 9]),
+            block("second", emotion=0, energy=0, rules=[2]),
+            notes(["fine"]),
+        ]
+    )
+    transcript = run(make_seed(), EchoCompanion(), user_model=provider, days=1, turns_per_day=2)
+    out = tmp_path / "run.jsonl"
+    transcript.to_jsonl(out)
+    lines = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines()]
+    first, second = lines[1], lines[2]
+    assert first["hidden"]["rules_triggered"] == [2, 9]  # as the model named them
+    assert first["rules_applied"] == [
+        {"rule": 2, "repeat": 1, "emotion_delta": 8, "energy_delta": 5}
+    ]  # 9 does not exist and is not applied
+    assert second["rules_applied"] == [
+        {"rule": 2, "repeat": 2, "emotion_delta": 4, "energy_delta": 2}
+    ]
+    assert Transcript.from_jsonl(out) == transcript
+
+
+def test_transcripts_without_applied_rules_still_load(tmp_path: Path) -> None:
+    transcript = run(
+        make_seed(), EchoCompanion(), user_model=FakeProvider(), days=1, turns_per_day=1
+    )
+    out = tmp_path / "old.jsonl"
+    transcript.to_jsonl(out)
+    old = []
+    for line in out.read_text(encoding="utf-8").splitlines():
+        data = json.loads(line)
+        data.pop("rules_applied", None)  # files written before the field existed
+        old.append(json.dumps(data))
+    out.write_text("\n".join(old) + "\n", encoding="utf-8")
+    loaded = Transcript.from_jsonl(out)
+    assert loaded.turns[0].rules_applied is None
+    assert loaded.turns[0].as_dict()["rules_applied"] is None
+    assert loaded.trajectory() == transcript.trajectory()
+
+
 @pytest.mark.parametrize(("days", "turns"), [(0, 1), (1, 0)])
 def test_run_rejects_empty_runs(days: int, turns: int) -> None:
     with pytest.raises(ValueError, match="at least 1"):

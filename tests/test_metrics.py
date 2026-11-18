@@ -123,6 +123,9 @@ def test_from_jsonl_rejects_broken_files(tmp_path: Path, text: str, message: str
         ({"polluted": "false"}, "polluted must be true or false"),
         ({"problems": "too_long"}, "problems must be a list"),
         ({"forced": 3}, "forced must be a string or null"),
+        ({"rules_applied": {"rule": 1}}, "rules_applied must be a list"),
+        ({"rules_applied": [{"rule": "1", "repeat": 1}]}, "rules_applied"),
+        ({"rules_applied": [{"repeat": 1}]}, "rule"),
     ],
 )
 def test_from_jsonl_checks_field_types(

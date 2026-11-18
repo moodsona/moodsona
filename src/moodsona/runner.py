@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 from moodsona.companion import Companion
 from moodsona.llm.base import ChatMessage, LLMProvider
 from moodsona.simulator import SafetyHook, SimulatorConfig
-from moodsona.state import DayNote, Mood, PersonaSeed, Stance
+from moodsona.state import AppliedRule, DayNote, Mood, PersonaSeed, Stance
 
 if TYPE_CHECKING:
     from moodsona.lang.base import LanguageProfile
@@ -39,6 +39,10 @@ class TurnRecord:
         polluted: True when the simulator fell back to a neutral line.
         problems: Rails that rejected earlier attempts of this turn.
         forced: A soft rail the accepted message still breaks, if any.
+        rules_applied: The reaction rules the code applied, with the deltas it
+            actually added after the repeat decay; ``hidden["rules_triggered"]``
+            keeps the numbers as the model named them. None when not recorded
+            (transcripts written before this field existed).
     """
 
     day: int
@@ -50,6 +54,7 @@ class TurnRecord:
     polluted: bool = False
     problems: tuple[str, ...] = ()
     forced: str | None = None
+    rules_applied: tuple[AppliedRule, ...] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """JSON-ready form (one line of :meth:`Transcript.to_jsonl`)."""
@@ -68,6 +73,9 @@ class TurnRecord:
             "polluted": self.polluted,
             "problems": list(self.problems),
             "forced": self.forced,
+            "rules_applied": (
+                None if self.rules_applied is None else [r.as_dict() for r in self.rules_applied]
+            ),
         }
 
     @classmethod
@@ -101,7 +109,30 @@ class TurnRecord:
             polluted=data["polluted"],
             problems=tuple(problems),
             forced=forced,
+            rules_applied=_applied_from_list(data.get("rules_applied")),
         )
+
+
+def _applied_from_list(value: Any) -> tuple[AppliedRule, ...] | None:
+    """``rules_applied`` from JSON; None when the line has none (older files)."""
+    if value is None:
+        return None
+    _require(isinstance(value, list), "rules_applied must be a list or null")
+    applied: list[AppliedRule] = []
+    for item in value:
+        _require(isinstance(item, dict), "rules_applied must hold objects")
+        rule, repeat = item["rule"], item["repeat"]
+        emotion, energy = item.get("emotion_delta"), item.get("energy_delta")
+        _require(
+            _is_int(rule) and _is_int(repeat),
+            "rules_applied: rule and repeat must be integers",
+        )
+        _require(
+            all(d is None or _is_int(d) for d in (emotion, energy)),
+            "rules_applied: deltas must be integers or null",
+        )
+        applied.append(AppliedRule(rule, repeat, emotion, energy))
+    return tuple(applied)
 
 
 @dataclass(frozen=True, slots=True)

@@ -166,6 +166,7 @@ def reference_run(
                     polluted=turn.polluted,
                     problems=turn.problems,
                     forced=turn.forced,
+                    rules_applied=turn.rules_applied,
                 )
             )
             if turn.ends_day:

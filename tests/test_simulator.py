@@ -83,6 +83,69 @@ def test_triggered_rules_are_applied_by_code() -> None:
     assert simulator.state.mood == Mood(58, 65, Stance.OPEN)
 
 
+def test_a_repeated_rule_has_diminishing_returns_within_a_day() -> None:
+    # Rule 2: emotion +8, energy +5, stance open. Rule 3: stance withdrawn only.
+    replies = [block(f"line {n}", emotion=0, energy=0, rules=[2]) for n in range(5)] + [
+        block("line 5", rules=[3]),
+        block("line 6", rules=[3]),
+        block("line 7", emotion=0, energy=0, rules=[2]),
+    ]
+    simulator, _ = _sim(replies)
+    moods, applied = [], []
+    for n in range(1, 6):
+        turn = simulator.next_turn([], day=1, turn_in_day=n)
+        moods.append((simulator.state.mood.emotion, simulator.state.mood.energy))
+        applied.append(turn.rules_applied)
+    # 50/60 at the start; +8/+5, then +4/+2, +2/+1, +1/+0, +0/+0.
+    assert moods == [(58, 65), (62, 67), (64, 68), (65, 68), (65, 68)]
+    assert [a[0].repeat for a in applied] == [1, 2, 3, 4, 5]
+    assert [(a[0].emotion_delta, a[0].energy_delta) for a in applied] == [
+        (8, 5), (4, 2), (2, 1), (1, 0), (0, 0)
+    ]  # fmt: skip
+    assert all(a[0].rule == 2 for a in applied)
+    assert simulator.state.mood.stance == Stance.OPEN
+    # A stance-only rule still changes the stance in full on every repeat.
+    simulator.next_turn([], day=1, turn_in_day=6)
+    simulator.state.mood = Mood(65, 68, Stance.OPEN)
+    turn = simulator.next_turn([], day=1, turn_in_day=7)
+    assert simulator.state.mood.stance == Stance.WITHDRAWN
+    assert turn.rules_applied[0].as_dict() == {
+        "rule": 3,
+        "repeat": 2,
+        "emotion_delta": None,
+        "energy_delta": None,
+    }
+    # The count resets overnight: the first use on day 2 is in full again.
+    simulator.start_day(2)
+    before = simulator.state.mood
+    turn = simulator.next_turn([], day=2, turn_in_day=1)
+    assert turn.rules_applied[0].repeat == 1
+    assert simulator.state.mood.emotion == before.emotion + 8
+
+
+def test_rule_repeat_decay_one_keeps_the_full_delta() -> None:
+    config = SimulatorConfig(rule_repeat_decay=1.0)
+    replies = [block(f"line {n}", emotion=0, energy=0, rules=[2]) for n in range(3)]
+    simulator, _ = _sim(replies, config=config)
+    for n in (1, 2, 3):
+        simulator.next_turn([], day=1, turn_in_day=n)
+    assert simulator.state.mood == Mood(74, 75, Stance.OPEN)
+
+
+def test_a_polluted_turn_does_not_count_as_a_rule_use() -> None:
+    simulator, _ = _sim(["x", "x", "x", block(emotion=0, energy=0, rules=[2])])
+    assert simulator.next_turn([], day=1, turn_in_day=1).polluted
+    turn = simulator.next_turn([], day=1, turn_in_day=2)
+    assert turn.rules_applied[0].repeat == 1
+    assert simulator.state.mood.emotion == 58
+
+
+@pytest.mark.parametrize("bad", [-0.1, 1.01, float("nan")])
+def test_rule_repeat_decay_must_be_between_zero_and_one(bad: float) -> None:
+    with pytest.raises(ValueError, match="rule_repeat_decay"):
+        SimulatorConfig(rule_repeat_decay=bad)
+
+
 def test_free_moves_are_capped() -> None:
     simulator, _ = _sim([block(emotion=100, energy=0)])
     simulator.next_turn([], day=1, turn_in_day=1)

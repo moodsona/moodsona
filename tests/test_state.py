@@ -15,6 +15,8 @@ from moodsona.state import (
     clamp_score,
     overnight,
     react,
+    repeat_delta,
+    repeated_rule,
 )
 from support import RULES, make_seed
 
@@ -106,6 +108,93 @@ def test_react_example_from_a_persona_rule() -> None:
     # Rule 1 covers energy only: emotion follows the model, capped at the free step.
     after = react(mood, proposed_emotion=95, proposed_energy=95, triggered=[RULES[0]])
     assert after == Mood(70, 50, Stance.GUARDED)
+
+
+rule_deltas = st.integers(min_value=-50, max_value=50)
+decays = st.floats(min_value=0.0, max_value=1.0)
+repeats = st.integers(min_value=1, max_value=40)
+
+
+def test_repeat_delta_halves_and_rounds_toward_zero() -> None:
+    assert [repeat_delta(10, repeat=k, decay=0.5) for k in range(1, 7)] == [10, 5, 2, 1, 0, 0]
+    assert [repeat_delta(-15, repeat=k, decay=0.5) for k in range(1, 5)] == [-15, -7, -3, -1]
+    assert [repeat_delta(10, repeat=k, decay=0.0) for k in (1, 2, 3)] == [10, 0, 0]
+    # Float noise does not cost a point: 10 * 0.7 is 7, not 6.
+    assert repeat_delta(10, repeat=2, decay=0.7) == 7
+
+
+@pytest.mark.parametrize(("repeat", "decay"), [(0, 0.5), (1, -0.1), (1, 1.5), (1, float("nan"))])
+def test_repeat_delta_rejects_bad_arguments(repeat: int, decay: float) -> None:
+    with pytest.raises(ValueError, match=r"^(repeat|decay) must be"):
+        repeat_delta(10, repeat=repeat, decay=decay)
+
+
+@given(rule_deltas, repeats, decays)
+def test_a_repeat_never_grows_or_flips_the_delta(delta: int, repeat: int, decay: float) -> None:
+    applied = repeat_delta(delta, repeat=repeat, decay=decay)
+    assert abs(applied) <= abs(delta)
+    assert applied == 0 or (applied > 0) == (delta > 0)
+    assert abs(repeat_delta(delta, repeat=repeat + 1, decay=decay)) <= abs(applied)
+    assert repeat_delta(delta, repeat=1, decay=decay) == delta
+
+
+@given(rule_deltas, repeats)
+def test_decay_one_is_the_old_full_delta(delta: int, repeat: int) -> None:
+    assert repeat_delta(delta, repeat=repeat, decay=1.0) == delta
+
+
+@given(rules, repeats, moods, scores, scores)
+def test_decay_one_reacts_exactly_as_before(
+    rule: ReactionRule, repeat: int, mood: Mood, emotion: int, energy: int
+) -> None:
+    assert repeated_rule(rule, repeat=repeat, decay=1.0) == rule
+    old = react(mood, proposed_emotion=emotion, proposed_energy=energy, triggered=[rule])
+    new = react(
+        mood,
+        proposed_emotion=emotion,
+        proposed_energy=energy,
+        triggered=[repeated_rule(rule, repeat=repeat, decay=1.0)],
+    )
+    assert new == old
+
+
+@given(rule_deltas, st.floats(min_value=0.0, max_value=0.95), st.integers(1, 200))
+def test_one_rule_moves_a_dimension_a_bounded_amount_per_day(
+    delta: int, decay: float, times: int
+) -> None:
+    total = sum(repeat_delta(delta, repeat=k, decay=decay) for k in range(1, times + 1))
+    # A geometric series: never more than delta / (1 - decay), however often it fires.
+    assert abs(total) <= abs(delta) / (1 - decay) + 1e-6
+
+
+@given(rules, decays, st.integers(1, 30), moods, scores, scores)
+def test_repeating_a_rule_keeps_the_state_in_range_and_its_stance(
+    rule: ReactionRule, decay: float, times: int, mood: Mood, emotion: int, energy: int
+) -> None:
+    for k in range(1, times + 1):
+        applied = repeated_rule(rule, repeat=k, decay=decay)
+        assert (applied.emotion_delta is None) == (rule.emotion_delta is None)
+        assert (applied.energy_delta is None) == (rule.energy_delta is None)
+        assert applied.stance_to == rule.stance_to  # the stance change always applies in full
+        mood = react(mood, proposed_emotion=emotion, proposed_energy=energy, triggered=[applied])
+        assert 0 <= mood.emotion <= 100
+        assert 0 <= mood.energy <= 100
+
+
+def test_rule_uses_are_counted_per_day_and_reset_overnight() -> None:
+    seed = make_seed()
+    state = PersonaState.initial(seed)
+    state.begin_day(seed, day=1)
+    assert [state.use_rule(2), state.use_rule(2), state.use_rule(1), state.use_rule(2)] == [
+        1,
+        2,
+        1,
+        3,
+    ]
+    state.begin_day(seed, day=1)  # the same day again: nothing resets
+    assert state.use_rule(2) == 4
+    state.begin_day(seed, day=2)
+    assert [state.use_rule(2), state.use_rule(1)] == [1, 1]
 
 
 @given(moods, moods, st.integers(min_value=-40, max_value=40), st.booleans())

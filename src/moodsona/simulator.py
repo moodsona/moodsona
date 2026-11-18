@@ -39,12 +39,15 @@ from moodsona.parse import HiddenBlock, ParseError, parse_day_notes, parse_turn
 from moodsona.prompts import REPAIRS
 from moodsona.state import (
     DAY_ENDING_INTENTS,
+    DEFAULT_RULE_REPEAT_DECAY,
     MAX_FREE_STEP,
+    AppliedRule,
     DayNote,
     Intent,
     PersonaSeed,
     PersonaState,
     react,
+    repeated_rule,
 )
 
 if TYPE_CHECKING:
@@ -87,6 +90,14 @@ class SimulatorConfig:
     #: False turns off everything that needs a language profile: the
     #: ``wrong_language`` rail, the agreement / ask-back ceilings and typing noise.
     language_checks: bool = True
+    #: In [0, 1]. The k-th time a reaction rule fires on one day, its emotion and
+    #: energy deltas are multiplied by ``rule_repeat_decay ** (k - 1)`` (rounded
+    #: toward zero). 1.0 applies the full deltas every time; 0.0 once a day.
+    rule_repeat_decay: float = DEFAULT_RULE_REPEAT_DECAY
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.rule_repeat_decay <= 1.0:
+            raise ValueError(f"rule_repeat_decay must be in [0, 1], got {self.rule_repeat_decay}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +113,8 @@ class SimulatorTurn:
         problems: The rail that rejected each failed attempt, in order.
         polluted: True when no attempt passed and the fallback line was used.
         forced: The soft rail a forced message still breaks, if any.
+        rules_applied: The same rules with the deltas actually applied, after
+            the repeat decay (``SimulatorConfig.rule_repeat_decay``).
     """
 
     text: str
@@ -112,6 +125,7 @@ class SimulatorTurn:
     problems: tuple[str, ...]
     polluted: bool = False
     forced: str | None = None
+    rules_applied: tuple[AppliedRule, ...] = ()
 
     @property
     def ends_day(self) -> bool:
@@ -352,11 +366,17 @@ class Simulator:
     ) -> SimulatorTurn:
         rules = self.seed.reaction_rules
         valid = tuple(n for n in hidden.rules_triggered if n <= len(rules))
+        triggered, applied = [], []
+        for n in valid:
+            repeat = self.state.use_rule(n)
+            rule = repeated_rule(rules[n - 1], repeat=repeat, decay=self.config.rule_repeat_decay)
+            triggered.append(rule)
+            applied.append(AppliedRule(n, repeat, rule.emotion_delta, rule.energy_delta))
         self.state.mood = react(
             self.state.mood,
             proposed_emotion=hidden.emotion,
             proposed_energy=hidden.energy,
-            triggered=[rules[n - 1] for n in valid],
+            triggered=triggered,
             max_free_step=self.config.max_free_step,
         )
         self.state.last_active_day = day
@@ -367,7 +387,14 @@ class Simulator:
         if self.language is not None and self.config.typing_noise > 0:
             text = self.language.add_typing_noise(message, self.rng, self.config.typing_noise)
         return SimulatorTurn(
-            text or message, message, hidden, valid, attempts, tuple(problems), False, forced
+            text or message,
+            message,
+            hidden,
+            valid,
+            attempts,
+            tuple(problems),
+            forced=forced,
+            rules_applied=tuple(applied),
         )
 
     def _remember_line(self, message: str) -> None:
