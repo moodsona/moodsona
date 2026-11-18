@@ -57,7 +57,8 @@ def test_run_carries_state_across_days_and_honours_intents() -> None:
     assert "secret thought" not in seen
     assert "<state>" not in seen
     assert all(t.hidden and "secret thought" in t.hidden["inner_thought"] for t in transcript.turns)
-    assert transcript.visible_history()[0] == ChatMessage("user", "day 1 line 1 about the weather")
+    first = ChatMessage("user", "day 1 line 1 about the weather", day=1)
+    assert transcript.visible_history()[0] == first
     # The companion sees the whole history, across days.
     assert len(companion.histories[-1]) == 2 * len(transcript.turns) - 1
 
