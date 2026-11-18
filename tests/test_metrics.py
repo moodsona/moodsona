@@ -86,7 +86,9 @@ def sample() -> Transcript:
 
 
 def test_jsonl_round_trip(tmp_path: Path) -> None:
-    transcript = run(make_seed(), FakeProvider(), EchoCompanion(), days=3, turns_per_day=2)
+    transcript = run(
+        make_seed(), EchoCompanion(), user_model=FakeProvider(), days=3, turns_per_day=2
+    )
     transcript.skipped_days.append(9)
     path = tmp_path / "run.jsonl"
     transcript.to_jsonl(path)

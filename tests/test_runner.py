@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -10,7 +11,7 @@ from moodsona.companion import EchoCompanion, ScriptedCompanion
 from moodsona.llm.base import ChatMessage
 from moodsona.llm.fake import FakeProvider, plumbing_reply
 from moodsona.prompts import NOTES_MARKER
-from moodsona.runner import TrajectoryPoint, run
+from moodsona.runner import TrajectoryPoint, Transcript, run
 from support import block, make_seed, notes
 
 
@@ -34,7 +35,9 @@ def scheduled(messages: Sequence[ChatMessage]) -> str:
 def test_run_carries_state_across_days_and_honours_intents() -> None:
     provider = FakeProvider(scheduled)
     companion = ScriptedCompanion(["Mm, tell me more."], cycle=True)
-    transcript = run(make_seed(), provider, companion, days=5, turns_per_day=3, rng_seed=1)
+    transcript = run(
+        make_seed(), companion, user_model=provider, days=5, turns_per_day=3, rng_seed=1
+    )
 
     per_day = {d: sum(1 for t in transcript.turns if t.day == d) for d in range(1, 6)}
     assert per_day == {1: 3, 2: 2, 3: 1, 4: 0, 5: 3}
@@ -64,7 +67,9 @@ def test_run_carries_state_across_days_and_honours_intents() -> None:
 
 
 def test_trajectory_and_jsonl(tmp_path: Path) -> None:
-    transcript = run(make_seed(), FakeProvider(), EchoCompanion(), days=2, turns_per_day=2)
+    transcript = run(
+        make_seed(), EchoCompanion(), user_model=FakeProvider(), days=2, turns_per_day=2
+    )
     points = transcript.trajectory()
     assert points[0] == TrajectoryPoint(1, 1, 51, 58, "curious")
     assert [(p.day, p.turn) for p in points] == [(1, 1), (1, 2), (2, 1), (2, 2)]
@@ -83,7 +88,14 @@ def test_runs_are_reproducible_from_their_seed() -> None:
     seed = make_seed(overnight_energy_jitter=15)
 
     def once(rng_seed: int) -> list[TrajectoryPoint]:
-        return run(seed, FakeProvider(), EchoCompanion(), 3, 2, rng_seed).trajectory()
+        return run(
+            seed,
+            EchoCompanion(),
+            user_model=FakeProvider(),
+            days=3,
+            turns_per_day=2,
+            rng_seed=rng_seed,
+        ).trajectory()
 
     assert once(7) == once(7)
     assert any(once(7) != once(other) for other in (1, 2, 3))
@@ -91,7 +103,7 @@ def test_runs_are_reproducible_from_their_seed() -> None:
 
 def test_polluted_turns_are_recorded() -> None:
     provider = FakeProvider(["junk"] * 3 + [notes(["meh"])])
-    transcript = run(make_seed(), provider, EchoCompanion(), days=1, turns_per_day=1)
+    transcript = run(make_seed(), EchoCompanion(), user_model=provider, days=1, turns_per_day=1)
     record = transcript.turns[0]
     assert record.polluted
     assert record.hidden is None
@@ -102,27 +114,39 @@ def test_polluted_turns_are_recorded() -> None:
 @pytest.mark.parametrize(("days", "turns"), [(0, 1), (1, 0)])
 def test_run_rejects_empty_runs(days: int, turns: int) -> None:
     with pytest.raises(ValueError, match="at least 1"):
-        run(make_seed(), FakeProvider(), EchoCompanion(), days, turns)
+        run(make_seed(), EchoCompanion(), user_model=FakeProvider(), days=days, turns_per_day=turns)
 
 
 def test_run_rejects_an_unknown_language_before_any_model_call() -> None:
     provider = FakeProvider()
     with pytest.raises(LookupError, match="No language profile for 'xx'"):
-        run(make_seed(language="xx"), provider, EchoCompanion(), 1, 1)
+        run(make_seed(language="xx"), EchoCompanion(), user_model=provider, days=1, turns_per_day=1)
     assert provider.calls == []
 
 
 def test_run_with_the_english_profile() -> None:
     lang = pytest.importorskip("moodsona.lang")
     profile = lang.get_profile("en")
-    transcript = run(make_seed(), FakeProvider(), EchoCompanion(), 1, 3, language=profile)
+    transcript = run(
+        make_seed(),
+        EchoCompanion(),
+        user_model=FakeProvider(),
+        days=1,
+        turns_per_day=3,
+        language=profile,
+    )
     assert len(transcript.turns) == 3
     assert not any(t.polluted for t in transcript.turns)
 
 
 def test_jsonl_keeps_the_run_header_and_skipped_days(tmp_path: Path) -> None:
     transcript = run(
-        make_seed(), FakeProvider(scheduled), EchoCompanion(), days=5, turns_per_day=3, rng_seed=1
+        make_seed(),
+        EchoCompanion(),
+        user_model=FakeProvider(scheduled),
+        days=5,
+        turns_per_day=3,
+        rng_seed=1,
     )
     out = tmp_path / "run.jsonl"
     transcript.to_jsonl(out)
@@ -142,3 +166,45 @@ def test_jsonl_keeps_the_run_header_and_skipped_days(tmp_path: Path) -> None:
     assert [line["day"] for line in by_kind["skipped_day"]] == transcript.skipped_days == [4]
     assert len(by_kind["turn"]) == len(transcript.turns)
     assert [line["day"] for line in by_kind["day_notes"]] == [n.day for n in transcript.notes]
+
+
+# run() without its type hints, to make the calls mypy would reject.
+untyped_run: Callable[..., Transcript] = run
+
+
+@pytest.mark.parametrize(
+    ("args", "kwargs"),
+    [
+        pytest.param((FakeProvider(),), {}, id="user-model"),
+        pytest.param((FakeProvider(), 1, 1), {}, id="user-model-days-turns"),
+        pytest.param((1,), {"user_model": FakeProvider()}, id="days"),
+    ],
+)
+def test_run_takes_only_the_persona_and_the_companion_by_position(
+    args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> None:
+    with pytest.raises(TypeError, match="positional"):
+        untyped_run(make_seed(), EchoCompanion(), *args, **kwargs)
+
+
+def test_run_needs_an_explicit_user_model() -> None:
+    with pytest.raises(TypeError, match="user_model"):
+        untyped_run(make_seed(), EchoCompanion())
+
+
+def test_run_names_the_companion_when_it_is_a_model() -> None:
+    model = FakeProvider()
+    with pytest.raises(TypeError, match=r"companion must have a reply\(history\) method; got Fake"):
+        untyped_run(make_seed(), model, user_model=EchoCompanion())
+    assert model.calls == []
+
+
+def test_run_names_the_user_model_when_it_is_a_companion() -> None:
+    with pytest.raises(TypeError, match=r"user_model must have a complete\(messages\) method"):
+        untyped_run(make_seed(), EchoCompanion(), user_model=EchoCompanion())
+
+
+def test_run_defaults_to_three_days_of_six_turns() -> None:
+    transcript = run(make_seed(), EchoCompanion(), user_model=FakeProvider())
+    assert (transcript.days, transcript.turns_per_day, transcript.rng_seed) == (3, 6, 0)
+    assert len(transcript.turns) == 3 * 6

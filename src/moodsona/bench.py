@@ -212,7 +212,14 @@ def run_one(
     """
     path = run_path(out_dir, model, persona.id, rng_seed)
     path.parent.mkdir(parents=True, exist_ok=True)
-    transcript = run(persona, provider, bench_companion(), days, turns_per_day, rng_seed)
+    transcript = run(
+        persona,
+        bench_companion(),
+        user_model=provider,
+        days=days,
+        turns_per_day=turns_per_day,
+        rng_seed=rng_seed,
+    )
     transcript.to_jsonl(path)
     return _scored(model, path, transcript, persona.language)
 
