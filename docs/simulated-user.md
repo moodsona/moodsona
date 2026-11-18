@@ -53,11 +53,16 @@ from moodsona import ChatMessage
 
 history = []
 while not user.done:
-    history.append(ChatMessage("user", user.reply(history)))
-    history.append(ChatMessage("assistant", my_bot(history)))  # your chatbot
+    history.append(ChatMessage("user", user.reply(history), day=user.day))
+    history.append(ChatMessage("assistant", my_bot(history), day=user.day))  # your chatbot
 transcript = user.finish(history)
 transcript.to_jsonl("anxious-newcomer.jsonl")
 ```
+
+`user.day` after a `reply` is the simulated day that message belongs to, from
+1. Tagging both messages with it gives your bot the same day signal that
+`run()` gives. The persona ignores the tags, so a history with or without them
+(or OpenAI-style mappings with an extra `"day"` key) reads the same.
 
 `finish(history)` fills in the bot's last reply, writes the open day's notes
 and returns the same `Transcript` as `run()`. Read the JSONL file with
@@ -65,6 +70,31 @@ and returns the same `Transcript` as `run()`. Read the JSONL file with
 same transcript without new model calls. `user.transcript(history)` and
 `user.metrics(history)` give a snapshot at any point and never call the model.
 If the model fails (`LLMError`), nothing is lost: repeat the same call.
+
+## Day-aware companions
+
+A bot with its own memory needs to know where one simulated day ends and the
+next begins, or "does it remember yesterday" cannot be tested fairly. Every
+message `run()` passes to the companion, and every message of
+`Transcript.visible_history()`, has a `day` (from 1). A new day starts when
+the `day` of the newest user message differs from the previous message's:
+
+```python
+class MyBot:
+    def __init__(self):
+        self.day = None
+
+    def reply(self, history):
+        newest = history[-1]
+        if newest.day != self.day:  # the first message of a new simulated day
+            self.day = newest.day
+            self.start_new_session()  # your bot: a fresh session, yesterday in memory
+        return self.answer(newest.content)
+```
+
+Days the persona skips never appear, so the next `day` can be more than one
+higher. Messages you build yourself have `day=None` unless you pass one.
+Model providers send only `role` and `content` to the API.
 
 ## openevals
 

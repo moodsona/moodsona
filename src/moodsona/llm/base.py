@@ -24,10 +24,16 @@ class ChatMessage:
     Attributes:
         role: ``"system"``, ``"user"`` or ``"assistant"``.
         content: The message text.
+        day: The simulated day the message belongs to, from 1; None when
+            unknown (for example a message built by hand or for a model call).
+            :func:`moodsona.run` tags every message it passes to the companion,
+            so a companion with its own memory can tell the days apart. Model
+            providers never send it.
     """
 
     role: Role
     content: str
+    day: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
