@@ -120,15 +120,15 @@ the model's output. To compare two bots (or two versions of one):
 
 - **Use mean emotion over the run as the primary outcome**, not the emotion
   at the end. The end value hangs on the last exchange or two. In a 75-run
-  study (5 bots x 5 personas x 3 repeats) the spread between repeats of the
-  same setup, as a pooled standard deviation, was 3.7 points for mean emotion
-  and 9.1 for the end value.
-- **Run 5 to 10 repeats per bot** and look at the spread. To detect a true
-  difference of 10 points (alpha 0.05, power 0.8) that study needed about 4
-  repeats per bot with mean emotion and about 14 with the end value; 5 points
-  need about 10 repeats with mean emotion. Three repeats show only
-  differences of about 11 points or more. Details:
-  [validation study](validation-study.md).
+  study by the maintainer (5 bot variants x 5 personas x 3 repeats) the spread
+  between repeats of the same setup, as a pooled standard deviation, was 3.7
+  points for mean emotion and 9.1 for the end value.
+- **Run 5 to 10 repeats per bot** and look at the spread. At those spreads,
+  and with `compare_runs` (Welch, alpha 0.05, power 0.8, checked by
+  simulation), a true difference in mean emotion of about 10 points takes
+  about 4 repeats per bot, about 8 points 5 repeats and about 5 points 10
+  repeats; three repeats show only differences of about 13 points or more.
+  With the end value, 10 points take about 14 repeats per bot.
 
 ```python
 import moodsona
@@ -148,7 +148,7 @@ mine = run_repeats(
 )
 theirs = run_repeats(persona, OtherBot, repeats=5, user_model=provider, rng_seed=7)
 print(summarize_runs(mine, persona=persona).to_text())
-print(compare_runs(summarize_runs(mine), summarize_runs(theirs)))  # mean emotion, mine minus theirs
+print(compare_runs(summarize_runs(mine), summarize_runs(theirs)).to_text())  # mine minus theirs
 ```
 
 `run_repeats` takes a companion *factory* (your class, or
@@ -156,16 +156,21 @@ print(compare_runs(summarize_runs(mine), summarize_runs(theirs)))  # mean emotio
 memory does not carry one run into the next. Repeat `i` runs with
 `rng_seed + i`: with one seed for all repeats they would share the same
 overnight energy and typing noise, and the spread would leave that part out.
-Use the same starting seed for both bots. Runs are sequential, and each one
-costs a full run's model calls; `on_run` gets each transcript as soon as it is
-done, so finished runs survive a failure later on.
+The same starting seed for two bots gives their repeats the same overnight
+energy offsets and typing-noise draws, nothing more; `compare_runs` treats the
+two sets as independent, not as pairs. Runs are sequential, and each one
+costs a full run's model calls. `on_run` gets each transcript as soon as it is
+done (to write it to disk, say); if a repeat fails, `run_repeats` raises
+`RepeatRunError`, whose `transcripts` holds the runs finished so far.
 
 `summarize_runs` works on any transcripts, including ones read back with
 `Transcript.from_jsonl`. For mean emotion, end emotion, emotion change, mean
 energy, turns and days ended early it gives the number of runs, the mean, the
 sample standard deviation, min, max and a 95 % t interval for the mean
 (`ci95`), plus a count of final stances. With one run there is no SD and no
-interval; with two the interval is honest and very wide. `compare_runs` gives
+interval; with two the interval is honest and very wide. When every run has
+the same value (SD 0) the interval shrinks to a point; that is not certainty,
+and `to_text()` shows it as `n/a (no spread)`. `compare_runs` gives
 the difference in means between two summaries with a Welch 95 % interval
 (`measure=` picks another measure). An interval that includes 0 does not mean
 the bots are equally good, only that there are too few runs to tell them

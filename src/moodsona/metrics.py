@@ -105,8 +105,8 @@ class TranscriptMetrics:
             divided by the active days.
         polluted_share: Share of turns that fell back to the neutral line.
         forced_share: Share of turns accepted despite a soft rail.
-        end_emotion: Emotion after the last message; None without messages.
-            A noisy outcome: it hangs on the last exchange or two.
+        end_emotion: Emotion after the last message (a noisy outcome: it
+            hangs on the last exchange or two); None without messages.
         emotion_change: ``end_emotion`` minus the persona's initial emotion;
             None without messages or when :func:`compute_metrics` was not
             given the persona (transcripts do not record the start).

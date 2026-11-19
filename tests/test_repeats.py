@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import statistics
+from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 
@@ -16,7 +17,9 @@ from moodsona.metrics import compute_metrics
 from moodsona.repeats import (
     MEASURES,
     MeasureSummary,
+    RepeatRunError,
     RunsSummary,
+    _incomplete_beta,
     _t_critical,
     compare_runs,
     run_repeats,
@@ -47,7 +50,7 @@ def test_summary_of_known_values() -> None:
     assert (s.n, s.mean, s.min, s.max) == (5, 3, 1, 5)
     assert s.sd == pytest.approx(math.sqrt(2.5))  # sample SD, n - 1 in the denominator
     assert s.ci95 is not None
-    half = 2.776 * math.sqrt(2.5) / math.sqrt(5)  # t(0.975, df=4)
+    half = 2.776445 * math.sqrt(2.5) / math.sqrt(5)  # t(0.975, df=4)
     assert s.ci95 == pytest.approx((3 - half, 3 + half))
 
 
@@ -62,24 +65,51 @@ def test_no_values_summarise_to_none() -> None:
 def test_two_values_get_the_wide_interval_they_deserve() -> None:
     s = summarize_values([40, 44])
     assert s.sd == pytest.approx(math.sqrt(8))
-    assert s.ci95 == pytest.approx((42 - 12.706 * 2, 42 + 12.706 * 2))  # t(df=1) = 12.706
+    half = 12.7062 * 2  # t(0.975, df=1) * sd / sqrt(2)
+    assert s.ci95 == pytest.approx((42 - half, 42 + half), abs=1e-3)
 
 
-def test_t_critical_values() -> None:
-    assert _t_critical(1) == 12.706
-    assert _t_critical(4) == 2.776
-    assert _t_critical(30) == 2.042
-    assert _t_critical(2.9) == _t_critical(2)  # fractional (Welch) df round down
-    assert _t_critical(35) == _t_critical(30)  # between table rows: the smaller df
-    assert _t_critical(10_000) == _t_critical(120)
-    with pytest.raises(ValueError, match="df"):
-        _t_critical(0.5)
+@pytest.mark.parametrize(
+    ("df", "t"),
+    [
+        # Integer df: the printed two-sided 95 % table.
+        (1, 12.706), (2, 4.303), (3, 3.182), (4, 2.776), (5, 2.571),
+        (10, 2.228), (30, 2.042), (120, 1.980), (1e7, 1.960),
+        # Fractional df, as Welch's interval produces them.
+        (1.9, 4.527), (2.5, 3.5747), (2.62, 3.460),
+    ],
+)  # fmt: skip
+def test_t_critical_is_the_exact_quantile(df: float, t: float) -> None:
+    assert _t_critical(df) == pytest.approx(t, abs=5e-4)
 
 
-@given(st.floats(min_value=1, max_value=500), st.floats(min_value=1, max_value=500))
+@given(
+    st.floats(min_value=0.5, max_value=50),
+    st.floats(min_value=0.5, max_value=50),
+    st.floats(min_value=0, max_value=1),
+)
+def test_incomplete_beta_identities(a: float, b: float, x: float) -> None:
+    value = _incomplete_beta(a, b, x)
+    assert 0 <= value <= 1
+    assert value == pytest.approx(1 - _incomplete_beta(b, a, 1 - x), abs=1e-9)
+    assert _incomplete_beta(a, 1, x) == pytest.approx(x**a, abs=1e-9)
+    assert _incomplete_beta(a, a, 0.5) == pytest.approx(0.5, abs=1e-9)
+
+
+def test_incomplete_beta_at_the_ends() -> None:
+    assert (_incomplete_beta(2, 3, 0), _incomplete_beta(2, 3, 1)) == (0, 1)
+
+
+def test_t_critical_needs_at_least_one_degree_of_freedom() -> None:
+    for df in (0.5, 0, -1, math.nan):
+        with pytest.raises(ValueError, match="df"):
+            _t_critical(df)
+
+
+@given(st.floats(min_value=1, max_value=1e6), st.floats(min_value=1, max_value=1e6))
 def test_t_critical_shrinks_with_df_and_stays_above_the_normal(a: float, b: float) -> None:
     low, high = sorted((a, b))
-    assert _t_critical(low) >= _t_critical(high) >= 1.96
+    assert _t_critical(low) >= _t_critical(high) >= 1.959
 
 
 scores = st.floats(min_value=0, max_value=100, allow_nan=False)
@@ -214,7 +244,14 @@ def test_runs_summary_text() -> None:
     assert lines[1].split() == ["n", "mean", "sd", "min", "max", "95%", "interval"]
     assert lines[2].split()[:4] == ["mean", "emotion", "2", "47.0"]
     assert "emotion change" in text
-    assert "final stance   curious 2" in lines
+    assert "final stance     curious 2" in lines  # aligned with the measure labels
+
+
+def test_runs_summary_text_shows_no_interval_without_spread() -> None:
+    lines = summarize_runs([transcript(40), transcript(40)]).to_text().splitlines()
+    assert lines[2].split() == [
+        "mean", "emotion", "2", "40.0", "0.0", "40.0", "40.0", "n/a", "(no", "spread)",
+    ]  # fmt: skip
 
 
 def test_runs_summary_text_of_one_run_says_there_is_no_interval() -> None:
@@ -236,9 +273,41 @@ def test_welch_difference_by_hand() -> None:
     assert (d.measure, d.n_a, d.n_b, d.difference) == ("mean_emotion", 3, 3, 7)
     va, vb = 4 / 3, 25 / 3  # variance / n per group
     df = (va + vb) ** 2 / (va**2 / 2 + vb**2 / 2)
-    assert d.df == pytest.approx(df)  # about 2.62: t for df 2
-    half = 4.303 * math.sqrt(va + vb)
+    assert d.df == pytest.approx(df)  # about 2.62, not rounded to a table row
+    assert _t_critical(df) == pytest.approx(3.460, abs=5e-3)
+    half = _t_critical(df) * math.sqrt(va + vb)
     assert d.ci95 == pytest.approx((7 - half, 7 + half))
+
+
+def test_welch_interval_with_unequal_groups() -> None:
+    d = compare_runs(runs_with_means(40, 42, 47, 39, 44), runs_with_means(30, 41, 35))
+    assert d.df == pytest.approx(2.84, abs=0.01)
+    assert d.ci95 == pytest.approx((-4.4, 18.5), abs=0.05)
+
+
+def test_difference_text() -> None:
+    d = compare_runs(runs_with_means(40, 42, 47, 39, 44), runs_with_means(30, 41, 35))
+    assert d.to_text() == (
+        "mean emotion, a minus b: +7.1 (95% interval -4.4 to 18.5, Welch df 2.8; n 5 vs 3)"
+    )
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "text"),
+    [
+        (
+            (40,),
+            (30, 35),
+            "mean emotion, a minus b: +7.5 (no interval: needs 2 runs a side; n 1 vs 2)",
+        ),
+        ((40, 40), (30, 30), "mean emotion, a minus b: +10.0 (no interval: no spread; n 2 vs 2)"),
+        ((40, 42), (), "mean emotion, a minus b: n/a (n 2 vs 0)"),
+    ],
+)
+def test_difference_text_without_an_interval(
+    a: tuple[int, ...], b: tuple[int, ...], text: str
+) -> None:
+    assert compare_runs(runs_with_means(*a), runs_with_means(*b)).to_text() == text
 
 
 def test_compare_another_measure() -> None:
@@ -349,11 +418,14 @@ def test_run_repeats_checks_its_arguments_before_any_model_call() -> None:
     instance: object = EchoCompanion()
     with pytest.raises(TypeError, match="make_companion"):
         run_repeats(make_seed(), instance, repeats=2, user_model=provider)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="days"):
+        run_repeats(make_seed(), EchoCompanion, repeats=2, user_model=provider, days=0)
+    with pytest.raises(TypeError, match="user_model"):
+        run_repeats(make_seed(), EchoCompanion, repeats=2, user_model=EchoCompanion())  # type: ignore[arg-type]
     assert provider.calls == []
 
 
-def test_run_repeats_keeps_finished_runs_when_a_later_one_fails() -> None:
-    saved: list[Transcript] = []
+def test_a_failing_companion_factory_keeps_the_finished_runs() -> None:
     calls = 0
 
     def make() -> Companion:
@@ -363,8 +435,31 @@ def test_run_repeats_keeps_finished_runs_when_a_later_one_fails() -> None:
             raise RuntimeError("bot is down")
         return EchoCompanion()
 
-    with pytest.raises(RuntimeError, match="bot is down"):
+    with pytest.raises(RepeatRunError, match=r"repeat 2 of 3 \(rng_seed 1\).*bot is down") as info:
+        run_repeats(make_seed(), make, repeats=3, user_model=FakeProvider(), days=1)
+    assert [t.rng_seed for t in info.value.transcripts] == [0]
+    assert isinstance(info.value.__cause__, RuntimeError)
+
+
+class BrokenCompanion:
+    def reply(self, history: object) -> str:
+        raise ConnectionError("timeout")
+
+
+def test_a_failing_run_keeps_the_finished_runs() -> None:
+    made: Iterator[Companion] = iter([EchoCompanion(), EchoCompanion(), BrokenCompanion()])
+    with pytest.raises(RepeatRunError, match="timeout") as info:
+        run_repeats(make_seed(), lambda: next(made), repeats=3, user_model=FakeProvider(), days=1)
+    assert [t.rng_seed for t in info.value.transcripts] == [0, 1]
+    assert isinstance(info.value.__cause__, ConnectionError)
+
+
+def test_a_failing_on_run_keeps_its_own_run_too() -> None:
+    def save(transcript: Transcript) -> None:
+        raise OSError("disk full")
+
+    with pytest.raises(RepeatRunError, match="disk full") as info:
         run_repeats(
-            make_seed(), make, repeats=3, user_model=FakeProvider(), days=1, on_run=saved.append
+            make_seed(), EchoCompanion, repeats=3, user_model=FakeProvider(), days=1, on_run=save
         )
-    assert [t.rng_seed for t in saved] == [0]
+    assert [t.rng_seed for t in info.value.transcripts] == [0]

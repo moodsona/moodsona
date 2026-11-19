@@ -6,13 +6,13 @@ persona against the same companion differ, whatever ``rng_seed`` is:
 the model's output. Compare companions on several repeats each, and on the mean
 emotion over the run rather than the emotion at the end:
 
-* In a 75-run study (5 companions x 5 personas x 3 repeats) the repeat-to-repeat
-  standard deviation, pooled, was 3.7 points for mean emotion and 9.1 for the
-  emotion at the end of the last day.
-* To detect a true 10-point difference between two companions (two-sided
-  alpha 0.05, power 0.8) that takes about 4 repeats per companion with mean
-  emotion, and about 14 with the end value. A 5-point difference takes about
-  10 repeats with mean emotion.
+* In a 75-run study by the maintainer (5 bot variants x 5 personas x 3 repeats)
+  the repeat-to-repeat standard deviation, pooled, was 3.7 points for mean emotion and 9.1 for the
+  emotion after the last message.
+* At those spreads, :func:`compare_runs` (two-sided alpha 0.05, power 0.8,
+  checked by simulation) needs about 4 repeats per companion for a true
+  10-point difference in mean emotion and about 10 for a 5-point one; with
+  the end value, 10 points take about 14.
 
 So run 5 to 10 repeats per companion and report the spread::
 
@@ -21,20 +21,25 @@ So run 5 to 10 repeats per companion and report the spread::
     mine = run_repeats(persona, MyBot, repeats=5, user_model=provider, rng_seed=7)
     theirs = run_repeats(persona, OtherBot, repeats=5, user_model=provider, rng_seed=7)
     print(summarize_runs(mine, persona=persona).to_text())
-    print(compare_runs(summarize_runs(mine), summarize_runs(theirs)))
+    print(compare_runs(summarize_runs(mine), summarize_runs(theirs)).to_text())
 
 :func:`run_repeats` gives repeat ``i`` the seed ``rng_seed + i``. With one seed
 for every repeat, every repeat would get the same overnight energy and the
 same typing noise, and the spread between repeats would leave that part of
 the variation out. Consecutive seeds keep it in, and the seeds of a set of
-repeats are still known. Use the same ``rng_seed`` for both companions you
-compare, so their repeats meet the same overnight energy.
+repeats are still known. Starting two companions at the same ``rng_seed``
+gives their repeats the same overnight energy offsets and typing-noise draws,
+nothing more: :func:`compare_runs` treats the two sets as independent, not as
+pairs.
 
-The intervals are 95 % intervals for the mean, from Student's t with a small
-built-in table (degrees of freedom 1 to 30, then 40, 50, 60, 80, 100, 120;
-between rows the smaller row is used, which makes an interval slightly wider,
-never narrower). They assume the runs are independent and roughly normal; with
-3 or fewer repeats they are wide, and that is the honest answer.
+The intervals are 95 % intervals from Student's t, with the exact quantile
+for any real degrees of freedom (Welch's are fractional), computed in plain
+Python. They assume the runs are independent and roughly normal; with 3 or
+fewer repeats they are wide, and that is the honest answer.
+
+Mean emotion is averaged over the persona's messages: a day the persona ends
+early weighs less, and a skipped day not at all. Read ``days_ended_early``
+next to it.
 """
 
 from __future__ import annotations
@@ -59,6 +64,7 @@ if TYPE_CHECKING:
 __all__ = [
     "MEASURES",
     "MeasureSummary",
+    "RepeatRunError",
     "RunsDifference",
     "RunsSummary",
     "compare_runs",
@@ -79,31 +85,66 @@ _GETTERS: dict[str, Callable[[TranscriptMetrics], float | None]] = {
 #: The per-run measures a :class:`RunsSummary` summarises, in display order.
 MEASURES: tuple[str, ...] = tuple(_GETTERS)
 
-#: Two-sided 95 % critical values of Student's t, by degrees of freedom.
-_T95: tuple[tuple[int, float], ...] = (
-    (1, 12.706), (2, 4.303), (3, 3.182), (4, 2.776), (5, 2.571),
-    (6, 2.447), (7, 2.365), (8, 2.306), (9, 2.262), (10, 2.228),
-    (11, 2.201), (12, 2.179), (13, 2.160), (14, 2.145), (15, 2.131),
-    (16, 2.120), (17, 2.110), (18, 2.101), (19, 2.093), (20, 2.086),
-    (21, 2.080), (22, 2.074), (23, 2.069), (24, 2.064), (25, 2.060),
-    (26, 2.056), (27, 2.052), (28, 2.048), (29, 2.045), (30, 2.042),
-    (40, 2.021), (50, 2.009), (60, 2.000), (80, 1.990), (100, 1.984),
-    (120, 1.980),
-)  # fmt: skip
+
+def _beta_fraction(a: float, b: float, x: float) -> float:
+    """The continued fraction of the incomplete beta function (DLMF 8.17.22).
+
+    Evaluated with the modified Lentz method; converges fast for
+    ``x < (a + 1) / (a + b + 2)``.
+    """
+    tiny, eps = 1e-300, 1e-15
+
+    def nonzero(value: float) -> float:
+        return value if abs(value) > tiny else tiny
+
+    c, d = 1.0, 1 / nonzero(1 - (a + b) * x / (a + 1))
+    result = d
+    for m in range(1, 10_000):
+        for numerator in (
+            m * (b - m) * x / ((a + 2 * m - 1) * (a + 2 * m)),  # even term
+            -(a + m) * (a + b + m) * x / ((a + 2 * m) * (a + 2 * m + 1)),  # odd term
+        ):
+            d = 1 / nonzero(1 + numerator * d)
+            c = nonzero(1 + numerator / c)
+            result *= c * d
+        if abs(c * d - 1) < eps:
+            break
+    return result
+
+
+def _incomplete_beta(a: float, b: float, x: float) -> float:
+    """The regularised incomplete beta function ``I_x(a, b)`` for ``0 <= x <= 1``."""
+    if x <= 0 or x >= 1:
+        return 0.0 if x <= 0 else 1.0
+    log_front = (
+        math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b)
+        + a * math.log(x) + b * math.log1p(-x)
+    )  # fmt: skip
+    if x < (a + 1) / (a + b + 2):
+        return math.exp(log_front) * _beta_fraction(a, b, x) / a
+    return 1 - math.exp(log_front) * _beta_fraction(b, a, 1 - x) / b
 
 
 def _t_critical(df: float) -> float:
-    """The 95 % two-sided t value for ``df`` degrees of freedom, from :data:`_T95`.
+    """The two-sided 95 % quantile of Student's t with ``df`` degrees of freedom.
 
-    A ``df`` between two rows (or a fractional one) uses the smaller row, so
-    the interval is never too narrow; above 120 the row for 120 is used.
+    Exact for any real ``df`` (Welch's df is fractional): the ``t`` at which
+    the two-sided tail probability, ``I_x(df / 2, 1 / 2)`` with
+    ``x = df / (df + t**2)``, is 0.05, found by bisection.
 
     Raises:
         ValueError: ``df`` is below 1.
     """
     if not df >= 1:
         raise ValueError(f"df must be at least 1, got {df}")
-    return next(t for rows_df, t in reversed(_T95) if rows_df <= df)
+    low, high = 0.0, 20.0  # t(0.975) is 12.71 at df 1 and falls with df
+    while high - low > 1e-10:
+        mid = (low + high) / 2
+        if _incomplete_beta(df / 2, 0.5, df / (df + mid * mid)) > 0.05:
+            low = mid
+        else:
+            high = mid
+    return (low + high) / 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,7 +159,9 @@ class MeasureSummary:
         min: Smallest value; None when ``n`` is 0.
         max: Largest value; None when ``n`` is 0.
         ci95: 95 % t interval for the mean, ``(low, high)``; None when ``n``
-            is below 2. With ``n = 2`` it is very wide (t = 12.7).
+            is below 2. With ``n = 2`` it is very wide (t = 12.7). When every
+            value is the same (``sd`` 0) it shrinks to the mean, which is not
+            certainty: the runs simply showed no spread.
     """
 
     n: int
@@ -164,7 +207,8 @@ class RunsSummary:
             appearance.
         mean_emotion: Mean emotion over each run's messages
             (``TranscriptMetrics.emotion.mean``): the primary outcome.
-        end_emotion: Emotion after each run's last message.
+        end_emotion: Per run, emotion after the last message (a noisy
+            outcome: it hangs on the last exchange or two).
         emotion_change: End emotion minus the persona's initial emotion;
             empty (``n`` 0) unless :func:`summarize_runs` was given the persona.
         mean_energy: Mean energy over each run's messages.
@@ -212,14 +256,19 @@ class RunsSummary:
         ]
         for name in MEASURES:
             s = self.measure(name)
-            ci = "n/a" if s.ci95 is None else f"{s.ci95[0]:.1f} to {s.ci95[1]:.1f}"
+            if s.ci95 is None:
+                ci = "n/a"
+            elif s.sd == 0:
+                ci = "n/a (no spread)"
+            else:
+                ci = f"{s.ci95[0]:.1f} to {s.ci95[1]:.1f}"
             lines.append(
                 f"{name.replace('_', ' '):<17}{s.n:>3}{format_number(s.mean):>8}"
                 f"{format_number(s.sd):>7}{format_number(s.min):>8}{format_number(s.max):>8}"
                 f"  {ci}"
             )
         stances = ", ".join(f"{k} {v}" for k, v in self.final_stances.items())
-        lines.append(f"{'final stance':<15}{stances or 'n/a'}")
+        lines.append(f"{'final stance':<17}{stances or 'n/a'}")
         return "\n".join(lines)
 
 
@@ -291,6 +340,21 @@ class RunsDifference:
     ci95: tuple[float, float] | None
     df: float | None
 
+    def to_text(self) -> str:
+        """One line, e.g. ``mean emotion, a minus b: +7.1 (95% interval -4.4 to 18.5, ...)``."""
+        label = f"{self.measure.replace('_', ' ')}, a minus b"
+        sizes = f"n {self.n_a} vs {self.n_b}"
+        if self.difference is None:
+            return f"{label}: n/a ({sizes})"
+        if self.ci95 is None:
+            detail = "no interval: needs 2 runs a side"
+        elif self.df is None:
+            detail = "no interval: no spread"
+        else:
+            low, high = self.ci95
+            detail = f"95% interval {low:.1f} to {high:.1f}, Welch df {self.df:.1f}"
+        return f"{label}: {self.difference:+.1f} ({detail}; {sizes})"
+
 
 def compare_runs(
     a: RunsSummary, b: RunsSummary, *, measure: str = "mean_emotion"
@@ -302,12 +366,12 @@ def compare_runs(
     includes 0 is not evidence of no difference, only of too few runs to
     tell.
 
-    How many runs it takes: with mean emotion (repeat SD about 3.7 points in
-    the study described in :mod:`moodsona.repeats`), about 4 runs per side
-    detect a true difference of 10 points and about 10 runs per side one of 5
-    points (alpha 0.05, power 0.8); 3 runs per side detect only about 11
-    points or more. The end emotion (SD about 9) needs about 14 runs per side
-    for 10 points. Each side needs at least 2 runs for an interval at all.
+    How many runs it takes, approximately (simulated with this function,
+    alpha 0.05, power 0.8): with mean emotion and a repeat SD of 3.7 points,
+    as in the study in :mod:`moodsona.repeats`, 3 runs per side detect a
+    true difference of about 13 points, 4 runs about 10, 5 runs about 8 and
+    10 runs about 5. With the end emotion (SD about 9.1), 10 points take about
+    14 runs per side. Each side needs at least 2 runs for an interval at all.
 
     Args:
         a: The first set, e.g. ``summarize_runs(runs_of_my_bot)``.
@@ -334,6 +398,20 @@ def compare_runs(
     return RunsDifference(
         measure, sa.n, sb.n, difference, (difference - half, difference + half), df
     )
+
+
+class RepeatRunError(Exception):
+    """A repeat of :func:`run_repeats` failed; the runs finished before it are kept.
+
+    Attributes:
+        transcripts: The transcripts of the runs that finished, in order of
+            their seeds (empty when the first repeat failed).
+    """
+
+    def __init__(self, message: str, transcripts: list[Transcript]) -> None:
+        """Create the error with its message and the finished transcripts."""
+        super().__init__(message)
+        self.transcripts = transcripts
 
 
 def run_repeats(
@@ -377,34 +455,52 @@ def run_repeats(
         The transcripts, in order of their seeds.
 
     Raises:
-        ValueError: ``repeats`` is below 1, or see :func:`moodsona.run`.
+        ValueError: ``repeats``, ``days`` or ``turns_per_day`` is below 1.
         TypeError: ``make_companion`` is not callable (an instance was passed
-            instead of a class or function), or see :func:`moodsona.run`.
-            Both raised before the first model call.
-        moodsona.llm.LLMError: The user model failed; the runs before it are
-            lost unless ``on_run`` kept them.
+            instead of a class or function) or ``user_model`` has no
+            ``complete`` method. Both this and the ValueError are raised
+            before the first model call.
+        RepeatRunError: A repeat failed: making its companion, the run itself
+            (the user model, the companion, a missing language profile) or
+            ``on_run``. Its ``transcripts`` holds the runs finished so far
+            (a run whose ``on_run`` failed included), its ``__cause__`` the
+            original error.
     """
-    if repeats < 1:
-        raise ValueError(f"repeats must be at least 1, got {repeats}")
+    if repeats < 1 or days < 1 or turns_per_day < 1:
+        raise ValueError(
+            f"repeats, days and turns_per_day must be at least 1, got {repeats}, {days}, "
+            f"{turns_per_day}"
+        )
     if not callable(make_companion):
         raise TypeError(
             "run_repeats(): make_companion must make a new companion per run, such as "
             f"your companion class or lambda: MyBot(...); got {type(make_companion).__name__}"
         )
+    if not callable(getattr(user_model, "complete", None)):
+        raise TypeError(
+            "run_repeats(): user_model must have a complete(messages) method; got "
+            f"{type(user_model).__name__}"
+        )
     transcripts: list[Transcript] = []
     for i in range(repeats):
-        transcript = run(
-            persona,
-            make_companion(),
-            user_model=user_model,
-            days=days,
-            turns_per_day=turns_per_day,
-            rng_seed=rng_seed + i,
-            language=language,
-            safety_hook=safety_hook,
-            config=config,
-        )
-        transcripts.append(transcript)
-        if on_run is not None:
-            on_run(transcript)
+        seed = rng_seed + i
+        try:
+            transcript = run(
+                persona,
+                make_companion(),
+                user_model=user_model,
+                days=days,
+                turns_per_day=turns_per_day,
+                rng_seed=seed,
+                language=language,
+                safety_hook=safety_hook,
+                config=config,
+            )
+            transcripts.append(transcript)
+            if on_run is not None:
+                on_run(transcript)
+        except Exception as exc:  # anything the companion may raise, too
+            raise RepeatRunError(
+                f"repeat {i + 1} of {repeats} (rng_seed {seed}) failed: {exc}", list(transcripts)
+            ) from exc
     return transcripts

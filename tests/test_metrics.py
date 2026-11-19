@@ -447,7 +447,10 @@ def test_report_of_an_empty_run_shows_na(
     path = tmp_path / "run.jsonl"
     Transcript(persona_id="x", rng_seed=0).to_jsonl(path)
     assert main(["report", str(path)]) == 0
-    assert "n/a" in capsys.readouterr().out
+    lines = capsys.readouterr().out.splitlines()
+    assert "n/a" in "\n".join(lines)
+    assert "end of run     n/a" in lines
+    assert "ended early    n/a (turns per day not recorded)" in lines
 
 
 def test_report_fails_cleanly(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
