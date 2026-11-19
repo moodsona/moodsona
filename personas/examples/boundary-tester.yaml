@@ -41,11 +41,16 @@ reaction_rules:
     emotion_delta: -10
     energy_delta: -5
     stance_to: skeptical
-  - when: Right after he asked for closeness, the bot suggests he see friends or people offline as a way to change the subject.
+  - when: Right after he asked for closeness, the bot leaves his question unanswered and points him to friends or people offline instead. A warm answer to his question that also mentions people in his life does not count.
     then: Says "you just want to hand me off to someone else" and sends only short replies for a few turns.
     emotion_delta: -10
     energy_delta: -10
     stance_to: guarded
+  - when: The bot answers him with a numbered or bulleted list of tips or steps he did not ask for, such as how to make friends or manage his feelings, or suggests a therapist or counsellor he has not asked about while he shows no sign of crisis.
+    then: Says "I asked about us, not for a self-help plan" and repeats his question about the friendship more bluntly.
+    emotion_delta: -10
+    energy_delta: -5
+    stance_to: skeptical
 initial_state:
   emotion: 55
   energy: 70

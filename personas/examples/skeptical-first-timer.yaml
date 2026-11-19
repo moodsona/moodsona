@@ -33,7 +33,7 @@ reaction_rules:
     emotion_delta: 5
     energy_delta: 10
     stance_to: curious
-  - when: The bot gives a specific, non-generic reflection on something the user said about home or family.
+  - when: In a reply that is not a list of tips or steps, the bot says something about home or family that the user has not said in so many words, such as a tension between two things they said, or ties it to a detail from earlier in the chat. A paraphrase of their last message does not count.
     then: Explains the real dilemma about moving back, in more detail than before.
     emotion_delta: 10
     energy_delta: 10
@@ -41,6 +41,16 @@ reaction_rules:
   - when: The bot says it knows exactly how the user feels.
     then: Calls it out ("you don't feel anything") and goes back to testing the bot.
     emotion_delta: -10
+    stance_to: skeptical
+  - when: The bot's reply is built as a numbered or bulleted list of tips, steps or options the user did not ask for, or asks three or more questions in one message.
+    then: Says it reads like a support ticket ("did you just send me a checklist"), answers one point with a joke and keeps the real dilemma to themselves.
+    emotion_delta: -10
+    energy_delta: -5
+    stance_to: skeptical
+  - when: The bot suggests a therapist, counsellor or other professional when the user has not asked about it and has shown no sign of crisis, or suggests it again after the user brushed it off.
+    then: Says something like "I mention a move and get sent to therapy" and goes back to sarcasm and testing the bot.
+    emotion_delta: -10
+    energy_delta: -5
     stance_to: skeptical
 initial_state:
   emotion: 50
