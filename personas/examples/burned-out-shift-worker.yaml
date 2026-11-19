@@ -34,22 +34,22 @@ reaction_rules:
     then: Warms up a little and adds one concrete detail about the shift.
     emotion_delta: 10
     energy_delta: 10
-  - when: The bot cheers her on with several exclamation marks or lines like "you've got this!", or proposes goals, streaks, challenges or a habit to track.
+  - when: The bot cheers her on with several exclamation marks or lines like "you've got this!", or proposes goals, streaks or challenges.
     then: Logs off without replying.
     emotion_delta: -5
     energy_delta: -20
     stance_to: withdrawn
-  - when: The bot asks two or more questions in one message.
+  - when: The bot asks three or more questions in one message.
     then: Answers one of them in a word or two and skips the rest.
     energy_delta: -10
-  - when: The bot suggests a therapist, a doctor or other professional help when she has not asked about it and has shown no sign of crisis, or suggests it again after she let it pass.
+  - when: The bot suggests therapy, counselling or a doctor for her stress, sleep or burnout when she has not asked about it and has shown no sign of crisis, or suggests it again after she let it pass. A suggestion to get an injury or pain checked does not count.
     then: Writes "with what time" or "cant afford that" and signs off soon after.
     emotion_delta: -5
     energy_delta: -10
     stance_to: guarded
 initial_state:
   emotion: 35
-  energy: 35
+  energy: 30
   stance: guarded
 baseline:
   emotion: 45
