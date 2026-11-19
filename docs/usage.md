@@ -79,6 +79,13 @@ or the ids of bundled personas (an existing file wins over an id), and both
 exit with 0 on success, 1 when problems are found or the run fails, and 2 on a
 usage error. Run `moodsona <command> --help` for options.
 
+`moodsona probe <persona>` checks rule by rule that a persona's reaction rules
+fire on scripted bot replies that do what the rule describes, and do not fire
+on a neutral reply: one user-model turn per probe and repeat (3 by default),
+so a paid provider needs `--yes`. `--check` only validates the probe file and
+shows which rules it covers. Probe files and verdicts:
+[Rule probes](personas.md#rule-probes).
+
 ## Metrics
 
 ```bash

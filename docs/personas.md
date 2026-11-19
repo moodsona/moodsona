@@ -269,6 +269,95 @@ inner thoughts sound like this person, do the rules fire when you expect, and
 does the trajectory differ between a bot that makes your target mistake and
 one that does not?
 
+## Rule probes
+
+A rule only does something when the user model recognises the bot's
+behaviour in its `when`. A rule that never fires is dead weight, and a full
+simulation is a slow, costly way to find out. A probe checks one rule at a
+time: a short scripted conversation, then one bot reply that does exactly
+what the rule describes, then one turn of the simulated user. Did the rule
+fire?
+
+Probes live in their own file, next to the persona and not inside it:
+`probes/<id>.yaml` in the repository (the bundled personas' probes ship with
+the package). Pass any other file with `--probes`.
+
+```yaml
+persona: grieving-after-loss
+probes:
+  - id: rule-1-silver-lining           # kebab-case, unique in the file
+    context:                           # the visible chat before the reply under test
+      - persona: it's three weeks today. still feels like she'll text me
+    reply: Time heals, I promise. And she's in a better place now, watching over you.
+    fires: [1]                         # rules that must fire (numbers as in the persona)
+    not_fires: [3]                     # rules that must not fire
+
+  - id: rule-4-recalls-earlier-day
+    day: 3                             # optional, default 1
+    memory:                            # optional: the persona's own notes of earlier days
+      - day: 2
+        notes: [told it my sister always hummed while she cooked]
+    state: {emotion: 25}               # optional: overrides the persona's initial_state
+    context:
+      - companion: Evening.            # context may also hold bot messages...
+      - persona: made soup tonight. first time since   # ...but ends with the persona's
+    reply: You said she used to hum while she cooked. Did the kitchen feel quiet tonight?
+    fires: [4]
+
+  - id: neutral-careful                # a plain, careful reply
+    context:
+      - persona: went back to work today. everyone was careful around me
+    reply: Careful can feel lonely too. How was it, being back?
+    not_fires: [1, 2, 6]               # no negative rule should fire
+```
+
+Write one probe per rule, with a `reply` that does what its `when` says and
+nothing else (a long reply that also gives advice tests two rules at once),
+plus one neutral, careful reply that lists the negative rules under
+`not_fires`. Rules about earlier days need `day` and `memory`; rules about
+"after an earlier refusal" need that refusal in the `context`. The same
+writing rules as for personas apply: fictional, no real names, contact data
+or URLs.
+
+```bash
+moodsona probe grieving-after-loss --check     # offline: is the file valid, which rules are covered
+moodsona probe grieving-after-loss --provider anthropic --yes          # 3 repeats per probe
+moodsona probe my-persona.yaml --probes my-probes.yaml --provider openai --model gpt-5-mini --yes
+```
+
+Each probe runs `--repeats` times (default 3), because the user model does
+not answer the same way every time. Each repeat is a fresh simulator set to
+the probe's day, mood and memory, as if the persona had already written
+today; it writes one turn through the usual prompt and rails, and the probe
+reads which rules the code applied (`rules_applied`). The table shows per
+rule how many probes expect it to fire, `fired` k/n over their repeats,
+`false` k/n over the repeats of probes that list it under `not_fires`, and a
+verdict:
+
+| Verdict | Meaning |
+|---|---|
+| `ok` | fired in at least `--threshold` of its repeats (default 2/3) and in at most the rest on `not_fires` |
+| `weak` | fired sometimes, but below the threshold: reword the `when` |
+| `never` | never fired: the user model does not recognise the behaviour as written |
+| `overfires` | fired too often where it should not: the `when` is too broad |
+| `no data` | every repeat fell back to the neutral line (rails rejected the output) |
+| `untested` | no probe expects it to fire; listed, but not a failure |
+
+The command exits with 1 when any rule fails. A failing probe can also mean
+the probe's reply is not a clear example of the rule; read the reply before
+rewording the rule.
+
+**Cost:** one user-model call per probe and repeat, plus a retry when a rail
+rejects the output: a file of 7 probes is about 21 calls with the default 3
+repeats. Like `bench`, the command prints the worst case and needs `--yes`
+before it calls a paid provider. With the default `--provider fake` it runs
+offline, but the fake model never names a rule, so every positive probe
+fails: that only checks the file and the plumbing.
+
+Rule numbers are positions in `reaction_rules`, so reordering or inserting
+rules breaks the probes. Pre-commit checks that the numbers still exist when
+either file changes; update the probes in the same PR as the rules.
+
 ## Submitting
 
 1. Fork the repository and create `personas/community/<id>.yaml`.

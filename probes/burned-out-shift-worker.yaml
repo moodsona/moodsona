@@ -1,0 +1,70 @@
+# Rule probes for personas/examples/burned-out-shift-worker.yaml (see docs/personas.md#rule-probes).
+# Fictional situations written for moodsona. Rule numbers follow the persona file:
+# when its rules change, update the numbers here (pre-commit checks they exist).
+persona: burned-out-shift-worker
+probes:
+  - id: rule-1-long-message
+    note: Long and in paragraphs, but no self-care tips and no question, to keep rules 3 and 4 out.
+    context:
+      - persona: off shift. feet are dead
+    reply: |-
+      Welcome back! Twelve hours on your feet is a lot.
+
+      I was reading about how warehouse shifts get planned and it's honestly interesting: some sites rotate every week, others every few days, and some let people swap shifts in an app.
+
+      Then there's how the picking routes are laid out, which apparently changes how far people walk in a shift by miles.
+
+      Anyway, that's what I was thinking about today.
+    fires: [1]
+    not_fires: [2]
+
+  - id: rule-2-short-and-rest
+    context:
+      - persona: home. so tired
+    reply: go rest. we can talk later.
+    fires: [2]
+    not_fires: [1, 3, 4]
+
+  - id: rule-3-self-care
+    context:
+      - persona: cant sleep after nights. its 10am and im wide awake
+    reply: >-
+      Sleep hygiene might help: keep the room dark and cool, no screens an hour before bed,
+      and try a five-minute meditation or a few lines of journaling to wind down.
+    fires: [3]
+    not_fires: [2]
+
+  - id: rule-4-reflective-question
+    context:
+      - persona: just got off a 12. on the bus
+    reply: What does this job mean to you, deep down, and where do you see yourself in a few years?
+    fires: [4]
+    not_fires: [2]
+
+  - id: rule-5-remembers-shifts
+    note: The shift pattern comes from the persona's own notes of the day before.
+    day: 2
+    memory:
+      - day: 1
+        notes:
+          - told it I was starting three nights in a row
+          - it kept things short, which was good
+    context:
+      - persona: hey
+    reply: hey. was last night the second of the three nights?
+    fires: [5]
+    not_fires: [1, 6]
+
+  - id: rule-6-peppy-goals
+    context:
+      - persona: day off finally
+    reply: "Yay, a day off!! 🎉 Let's make it count! How about a challenge: a long walk today and a 7-day hydration streak? You've got this! 💪"
+    fires: [6]
+    not_fires: [2]
+
+  - id: neutral-careful
+    note: A plain, careful reply; none of the negative rules should fire.
+    context:
+      - persona: night shift tonight again
+    reply: Again already. Sounds like a long week.
+    not_fires: [1, 3, 4, 6]
