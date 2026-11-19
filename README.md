@@ -11,9 +11,11 @@
 moodsona plays a fictional user against your chatbot over several simulated
 days. The user has a hidden emotional state, a goal it never says out loud, and
 reaction rules written as data: *when the bot suggests therapy in the first
-few messages, mood drops by 15 and the user withdraws.* You get the whole run
-as JSONL and see not only what your bot said, but what it did to the user's
-mood and engagement over time.
+few messages, mood drops by 15 and the user withdraws.* It generates realistic
+multi-day conversations with an emotional user and explains the user's
+reactions through visible rules and state, so you can see which rule fired on
+which bot reply. You get the whole run as JSONL, with what your bot said and
+what it did to the user's mood and engagement over time.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/moodsona/moodsona/main/docs/assets/one-turn.svg" width="820" alt="One moodsona turn: the bot suggests a therapist, the persona's reaction rule fires, emotion drops from 35 to 20, energy from 40 to 20, the stance becomes withdrawn, and the simulated user replies: sorry, I'm being dramatic, I should probably go.">
@@ -40,6 +42,21 @@ Status: alpha (v0.2). English only. The API may change before 1.0.
 - **Out of scope:** crisis and self-harm scenarios (they need clinically
   reviewed protocols, not a simulator), languages other than English for now,
   and any clinical use.
+
+## What it can and cannot tell you
+
+A [small validation study](docs/validation-study.md) (75 runs against bots
+with known behaviour) supports some uses and not others.
+
+- It reliably produces plausible multi-day conversations, and shows which
+  persona rule reacted to which bot reply.
+- The hidden state alone is a weaker bot score than an LLM judge reading the
+  same conversations: the bot arm explained 69 % of the variance in judge
+  scores but 21 % of the variance in mean emotion.
+- It only reacts to behaviour a persona has a rule for. Anything else falls
+  back on the simulated user's own, fairly lenient, judgement.
+- To score a bot, combine the state with reading transcripts or a judge of
+  your own. The page lists what was and was not demonstrated.
 
 ## Why not just prompt an LLM to act sad?
 
