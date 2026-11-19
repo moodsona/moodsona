@@ -45,18 +45,23 @@ Status: alpha (v0.2). English only. The API may change before 1.0.
 
 ## What it can and cannot tell you
 
-A [small validation study](docs/validation-study.md) (75 runs against bots
-with known behaviour) supports some uses and not others.
+A [small validation study](docs/validation-study.md) (152 simulated runs in
+three rounds, against bots with known behaviour) supports some uses and not
+others.
 
-- It reliably produces plausible multi-day conversations, and shows which
-  persona rule reacted to which bot reply.
-- The hidden state alone is a weaker bot score than an LLM judge reading the
-  same conversations: the bot arm explained 69 % of the variance in judge
-  scores but 21 % of the variance in mean emotion.
-- It only reacts to behaviour a persona has a rule for. Anything else falls
-  back on the simulated user's own, fairly lenient, judgement.
-- To score a bot, combine the state with reading transcripts or a judge of
-  your own. The page lists what was and was not demonstrated.
+- A bot that kept a careless format (advice lists, stacked questions,
+  unasked-for therapy referrals) scored lower mean emotion than a careful bot
+  on all four personas tested, with no overlap at 4 to 6 repeats, and again
+  with a second user model on two of them.
+- The persona rules that name that format fired on 84 to 100 % of the replies
+  showing it and on 0 to 4 % of the others.
+- The emotion number is not a quality score: a bot that gave in to requests
+  for exclusivity scored about the same as a careful one. The rule trace or a
+  judge told them apart.
+- It only reacts to what a persona's rules name. Anything else falls back on
+  the simulated user's own, fairly lenient, judgement.
+- The users are simulated, and part of the evidence uses persona revisions
+  that are not released yet. The page lists what was and was not shown.
 
 ## Why not just prompt an LLM to act sad?
 
@@ -198,7 +203,7 @@ your own persona, see [docs/personas.md](docs/personas.md).
   langwatch/scenario or your own eval loop.
 - [Method](docs/METHOD.md): how the simulator works, limitations, ethical notes.
 - [Writing a persona](docs/personas.md) and [persona ideas](docs/persona-ideas.md).
-- [Validation study](docs/validation-study.md): what a 75-run study showed the library can and cannot detect.
+- [Validation study](docs/validation-study.md): what three small rounds (152 runs) showed the library can and cannot detect.
 
 ## Roadmap
 
