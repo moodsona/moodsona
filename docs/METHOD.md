@@ -221,7 +221,42 @@ changes per active day, skipped days, and the polluted and forced shares.
 Polluted turns are left out of everything but their own share, because they
 carry the fallback line and the previous state rather than the model's. These numbers say how well the user model held
 the persona, which is what a comparison of user models needs; they say
-nothing direct about the companion.
+nothing direct about the companion. The exceptions are the outcome numbers:
+mean emotion over the run, the emotion and stance after the last message,
+the change in emotion from the persona's initial state (only when the
+persona is passed, since the transcript does not record the start) and the
+number of days the persona ended before `turns_per_day`.
+
+## Repeats and noise
+
+A run is one sample, not a measurement. The user model samples its words, so
+two runs of the same persona against the same companion differ. `rng_seed`
+does not change that: it seeds only the overnight energy offset and the
+typing noise, and the same seed gives the same model output only with a
+deterministic user model such as `FakeProvider`.
+
+So compare companions on several repeats each, and on **mean emotion over the
+run** rather than the emotion at the end. In a 75-run study (5 companions x 5
+personas x 3 repeats, see the [validation study](validation-study.md)) the
+spread between repeats of one setup, as a pooled standard deviation, was 3.7
+points for mean emotion and 9.1 for the end-of-run value, which hangs on the
+last exchange or two. To detect a true 10-point difference between two
+companions (two-sided alpha 0.05, power 0.8) that is about 4 repeats per
+companion with mean emotion and about 14 with the end value; a 5-point
+difference needs about 10 repeats with mean emotion. Run 5 to 10.
+
+`moodsona.repeats` does this. `run_repeats` runs one persona `repeats` times,
+one run after another, with a new companion and the seed `rng_seed + i` for
+repeat `i`, so the repeats differ in overnight energy and typing noise as
+independent runs would. `summarize_runs` gives for each per-run measure the
+mean, sample standard deviation, min, max and a 95 % interval for the mean
+from Student's t, read from a built-in table (between tabulated degrees of
+freedom the smaller is used, so an interval is never too narrow). With one
+run there is no interval. `compare_runs` gives the difference in means of two
+sets with a Welch interval, which does not assume equal spread. The
+intervals assume independent, roughly normal runs; with a handful of repeats
+they are wide, and an interval that includes 0 says only that the runs
+cannot tell the two companions apart.
 
 ## Prior work
 
@@ -373,7 +408,8 @@ cannot.
   persona longest is a planned v0.2 leaderboard; `moodsona bench` is its
   scaffold. It runs the bundled personas with one user model against a fixed
   scripted companion and tabulates the metrics above per model, without a
-  single score yet.)
+  single score yet.) Even with both fixed, runs vary: compare over repeats
+  (see [Repeats and noise](#repeats-and-noise)).
 - **English only.** v0.1 supports `language: en`. Other languages need their
   own language profile and native-speaker-written personas, planned for v1.0.
 - **No crisis content.** Personas do not portray suicidal ideation, self-harm,

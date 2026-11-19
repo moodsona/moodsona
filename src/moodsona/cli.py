@@ -206,6 +206,8 @@ def _report(args: argparse.Namespace) -> int:
         ("stance changes", f"{num(m.stance_changes_per_day, '.2f')} per day"),
         ("polluted", pct(m.polluted_share)),
         ("forced", pct(m.forced_share)),
+        ("end of run", f"emotion {num(m.end_emotion, 'd')}, stance {m.final_stance or 'n/a'}"),
+        ("ended early", f"{num(m.days_ended_early, 'd')} of {m.active_days} active day(s)"),
     ]
     lines += [f"{label:<15}{value}" for label, value in rows]
     sys.stdout.write("\n".join(lines) + "\n")

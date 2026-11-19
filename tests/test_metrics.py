@@ -202,6 +202,59 @@ def test_metrics_on_a_hand_built_transcript() -> None:
     assert m.forced_share == pytest.approx(1 / 6)
 
 
+def test_outcome_numbers_on_a_hand_built_transcript() -> None:
+    m = compute_metrics(sample())
+    assert m.emotion.mean == pytest.approx(228 / 5)  # mean emotion: the primary outcome
+    assert (m.end_emotion, m.final_stance) == (52, "open")  # the last message, day 3
+    # turns_per_day is 4: day 1 has four turns (its polluted one counts), day 3 ends after two.
+    assert m.days_ended_early == 1
+    assert m.emotion_change is None  # the start is not in the transcript; pass the persona
+
+
+def test_emotion_change_is_measured_from_the_personas_initial_state() -> None:
+    m = compute_metrics(sample(), persona=make_seed())  # initial emotion 50
+    assert m.emotion_change == 2
+    started_low = make_seed(initial_state=Mood(30, 60, Stance.GUARDED))
+    assert compute_metrics(sample(), persona=started_low).emotion_change == 22
+
+
+def test_the_persona_must_be_the_one_the_transcript_simulated() -> None:
+    with pytest.raises(ValueError, match="other-persona"):
+        compute_metrics(sample(), persona=make_seed(id="other-persona"))
+
+
+def test_end_of_run_skips_a_trailing_polluted_turn() -> None:
+    transcript = sample()
+    transcript.turns.append(turn(3, 3, "ok", polluted=True, emotion=10, stance=Stance.HOSTILE))
+    m = compute_metrics(transcript, persona=make_seed())
+    assert (m.end_emotion, m.final_stance, m.emotion_change) == (52, "open", 2)
+
+
+def test_only_polluted_turns_have_no_end_of_run() -> None:
+    transcript = Transcript(
+        persona_id="test-gardener", rng_seed=0, turns=[turn(1, 1, "ok", polluted=True)]
+    )
+    m = compute_metrics(transcript, persona=make_seed())
+    assert (m.end_emotion, m.final_stance, m.emotion_change) == (None, None, None)
+
+
+@pytest.mark.parametrize(
+    ("turns_per_day", "expected"),
+    [(None, None), (4, 1), (2, 0), (6, 2)],
+)
+def test_days_ended_early_needs_the_turn_limit(
+    turns_per_day: int | None, expected: int | None
+) -> None:
+    transcript = replace(sample(), turns_per_day=turns_per_day)
+    assert compute_metrics(transcript).days_ended_early == expected
+
+
+def test_skipped_days_do_not_count_as_ended_early() -> None:
+    transcript = Transcript(persona_id="x", rng_seed=0, skipped_days=[1, 2], turns_per_day=3)
+    m = compute_metrics(transcript)
+    assert (m.days_ended_early, m.days_skipped) == (0, 2)
+
+
 def test_unknown_intents_are_counted_as_other() -> None:
     transcript = sample()
     transcript.turns[1] = turn(1, 2, "yeah", intent="sing_a_song")
@@ -214,6 +267,8 @@ def test_metrics_of_an_empty_transcript_are_none_not_zero() -> None:
     m = compute_metrics(Transcript(persona_id="x", rng_seed=0, skipped_days=[1]))
     assert (m.turns, m.messages, m.active_days, m.days_skipped) == (0, 0, 0, 1)
     assert m.emotion == SeriesSummary(None, None, None)
+    assert (m.end_emotion, m.emotion_change, m.final_stance) == (None, None, None)
+    assert m.days_ended_early is None  # turns_per_day is unknown
     assert m.rule_trigger_rate is None
     assert m.agreement_rate is None
     assert m.stance_changes_per_day is None
@@ -337,6 +392,28 @@ def test_rates_are_shares(records: list[TurnRecord]) -> None:
     assert m.messages + round((m.polluted_share or 0) * m.turns) == m.turns
 
 
+@given(
+    st.lists(turns, max_size=25).map(lambda ts: sorted(ts, key=lambda t: t.day)),
+    st.integers(min_value=1, max_value=8),
+)
+def test_end_of_run_is_the_last_message(records: list[TurnRecord], turns_per_day: int) -> None:
+    transcript = Transcript(
+        persona_id="test-gardener", rng_seed=0, turns=records, turns_per_day=turns_per_day
+    )
+    m = compute_metrics(transcript, persona=make_seed())
+    messages = [t for t in records if not t.polluted]
+    if messages:
+        assert m.end_emotion == messages[-1].mood.emotion
+        assert m.final_stance == messages[-1].mood.stance.value
+        assert m.emotion_change == m.end_emotion - make_seed().initial_state.emotion
+        assert m.emotion.mean is not None
+        assert min(t.mood.emotion for t in messages) <= m.emotion.mean
+    else:
+        assert (m.end_emotion, m.final_stance, m.emotion_change) == (None, None, None)
+    assert m.days_ended_early is not None
+    assert 0 <= m.days_ended_early <= m.active_days
+
+
 # ------------------------------------------------------------------------ cli
 
 
@@ -353,6 +430,8 @@ def test_report_prints_a_compact_table(tmp_path: Path, capsys: pytest.CaptureFix
     assert "reply 60%" in out
     assert "change_topic" not in out  # intents that never occur are left out
     assert "rule triggers" in out
+    assert "end of run     emotion 52, stance open" in out.splitlines()
+    assert "ended early    1 of 2 active day(s)" in out.splitlines()
 
 
 def test_report_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
