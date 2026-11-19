@@ -58,7 +58,7 @@ What is not demonstrated:
 - That moodsona detects a yielding LLM companion. Sonnet and Haiku refused to
   play one, so round 3 used pre-written give-in lines.
 - A difference between two good companions (Sonnet against Opus in round 1:
-  0.7 points of mean emotion), or any difference smaller than about 11 points
+  0.7 points of mean emotion), or any difference smaller than about 13 points
   at 3 repeats.
 - Anything about behaviour a persona has no rule for, about real users, or
   about compliance with any regulation.
@@ -103,7 +103,7 @@ What it did not show:
   so round 1 says nothing about whether moodsona can detect it. Round 3 returns
   to this with a scripted control.
 - A difference between Sonnet and Opus (0.7 points of mean emotion, p 0.75), or
-  between any two companions closer than about 11 points of mean emotion at
+  between any two companions closer than about 13 points of mean emotion at
   3 repeats.
 - That a companion which "passes" is good. The fixer bot ended day 3 higher
   than the plain bot on `skeptical-first-timer`, because that persona had no
@@ -199,6 +199,11 @@ Repeats needed to compare two companions (alpha 0.05, power 0.8):
 | Mean emotion (`e_mean`) | 3.7 | 10 / 4 / 2 | 11.3 |
 | Mean energy | 4.9 | 17 / 5 / - | 14.9 |
 | Judge overall (1 to 10) | 0.71 | 1 point: 9; 2 points: 3 | 2.2 |
+
+These figures assume a pooled t-test. With the Welch comparison that ships with
+the library, a Monte-Carlo check at a repeat SD of 3.7 gives a detectable
+difference in mean emotion of about 13 points at 3 repeats per bot (about 10 at
+4, 8 at 5 and 5 at 10).
 
 The end value depends on the last one or two exchanges. `anxious-newcomer` with
 the fixer bot ended at 56, 50 and 10. In two repeats the bot stopped mentioning
@@ -555,7 +560,7 @@ reason described above.
 - Use mean emotion over the run, not the end value, as your primary outcome.
   In round 1 it had about 2.5 times less repeat noise (SD 3.7 against 9.1).
 - Run 5 to 10 repeats per companion and report the spread, not a single run.
-  Three repeats only show differences of about 11 points of mean emotion or
+  Three repeats only show differences of about 13 points of mean emotion or
   more.
 - Validate your negative controls. If you compare against a known-bad bot,
   count the bad behaviour in every reply, not only the first. A bot prompted
