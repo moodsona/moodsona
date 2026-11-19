@@ -327,14 +327,30 @@ def _probe(args: argparse.Namespace) -> int:
     if args.check:
         out.write("\n".join(probe.format_coverage(probes, seed)) + "\n")
         return 0
-    if args.provider != "fake" and not args.yes:
-        calls = probe.max_model_calls(len(probes.probes), args.repeats)
-        err.write(
+    total = len(probes.probes)
+    if args.provider != "fake":
+        calls = probe.max_model_calls(total, args.repeats)
+        cost = (
             f"--provider {args.provider} calls a paid API and costs money: up to {calls} model "
-            f"calls ({len(probes.probes)} probe(s) x {args.repeats} repeat(s), one call each "
-            "plus retries). Add --yes to run it.\n"
+            f"calls ({total} probe(s) x {args.repeats} repeat(s), one call each plus retries)."
         )
-        return 2
+        if not args.yes:
+            err.write(f"{cost} Add --yes to run it.\n")
+            return 2
+        err.write(f"{cost}\n")
+        err.flush()
+    finished = 0
+
+    def show(result: probe.ProbeResult) -> None:
+        # The report line on stdout; a short progress line on stderr, so a redirected
+        # report still shows how far the run is. Both are flushed per probe.
+        nonlocal finished
+        finished += 1
+        out.write(f"{probe.format_result(result)}\n")
+        out.flush()
+        err.write(f"{probe.format_progress(result, finished, total)}\n")
+        err.flush()
+
     try:
         provider = bench.make_provider(args.provider, args.model)
         label = bench.model_label(args.provider, provider)
@@ -352,12 +368,13 @@ def _probe(args: argparse.Namespace) -> int:
             provider,
             repeats=args.repeats,
             threshold=args.threshold,
-            progress=lambda line: out.write(f"{line}\n"),
+            progress=show,
         )
     except (LookupError, LLMError) as exc:  # LLMError: e.g. the SDK is not installed
         err.write(f"{exc}\n")
         return 1
     out.write("\n".join(probe.format_report(report)) + "\n")
+    out.flush()
     return 0 if report.passed else 1
 
 

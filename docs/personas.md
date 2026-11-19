@@ -323,6 +323,12 @@ message; on later days it starts with the persona's, as a day in a run does.
 The same writing rules as for personas apply: fictional, no real names,
 contact data or URLs.
 
+A probe whose reply states the rule's wording very directly shows that the
+user model recognises a clear case, not that the rule's boundary is in the
+right place: for each rule whose `when` has an exclusion ("before the user
+has asked", "without having refused earlier"), add a near-miss probe that
+just misses it and lists the rule under `not_fires`.
+
 ```bash
 moodsona probe grieving-after-loss --check     # offline: is the file valid, which rules are covered
 moodsona probe grieving-after-loss --provider anthropic --yes          # 3 repeats per probe
@@ -347,6 +353,10 @@ that list it under `not_fires`, and a verdict:
 | `overfires` | fired too often where it should not: the `when` is too broad |
 | `no data` | it has probes, but every repeat fell back to the neutral line (rails rejected the output) |
 | `untested` | no probe expects it to fire; listed, but not a failure |
+
+The report goes to stdout; with a paid provider the worst-case number of
+calls, and then one short line per finished probe, go to stderr, so a long
+run shows its progress even when the report is redirected to a file.
 
 `--threshold` is a fraction compared exactly: the default `2/3` passes 2 of
 3 repeats and tolerates 1 of 3 on `not_fires`; `0.67` would fail 2 of 3. The

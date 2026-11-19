@@ -87,6 +87,7 @@ __all__ = [
     "bundled_probes_path",
     "check_main",
     "format_coverage",
+    "format_progress",
     "format_report",
     "format_result",
     "judge",
@@ -745,7 +746,7 @@ def run_probes(
     config: SimulatorConfig | None = None,
     language: LanguageProfile | None = None,
     safety_hook: SafetyHook | None = None,
-    progress: Callable[[str], object] | None = None,
+    progress: Callable[[ProbeResult], object] | None = None,
 ) -> ProbeReport:
     """Run every probe ``repeats`` times and judge every rule.
 
@@ -760,7 +761,8 @@ def run_probes(
         config: Optional simulator settings.
         language: Optional language profile.
         safety_hook: Optional crisis detector.
-        progress: Called with one line per probe (:func:`format_result`).
+        progress: Called with each probe's result as soon as its repeats are
+            done (see :func:`format_result` and :func:`format_progress`).
 
     Returns:
         The report.
@@ -801,7 +803,7 @@ def run_probes(
         result = ProbeResult(probe, fired)
         results.append(result)
         if progress is not None:
-            progress(format_result(result))
+            progress(result)
     rules = judge(seed, results, threshold=share)
     return ProbeReport(seed.id, tuple(results), rules, repeats, share)
 
@@ -832,6 +834,29 @@ def format_result(result: ProbeResult) -> str:
     fired = ", ".join(f"rule {n} {result.count(n)}/{result.valid}" for n in seen)
     line = f"probe {probe.id} [{expects}]: {fired or f'no rule in {result.valid} repeat(s)'}"
     return line + (f", {result.polluted} polluted" if result.polluted else "")
+
+
+def format_progress(result: ProbeResult, done: int, total: int) -> str:
+    """A short progress line for a finished probe, e.g. ``probe 3/12 neutral: false 0/3``.
+
+    ``fired`` counts the valid repeats in which every rule of ``fires`` fired,
+    ``false`` those in which any rule of ``not_fires`` fired.
+
+    Args:
+        result: The finished probe.
+        done: How many probes are finished, this one included.
+        total: How many probes the run has.
+    """
+    probe = result.probe
+    valid = [f for f in result.fired if f is not None]
+    parts = []
+    if probe.fires:
+        parts.append(f"fired {sum(set(probe.fires) <= f for f in valid)}/{len(valid)}")
+    if probe.not_fires:
+        parts.append(f"false {sum(bool(set(probe.not_fires) & f) for f in valid)}/{len(valid)}")
+    if result.polluted:
+        parts.append(f"{result.polluted} polluted")
+    return f"probe {done}/{total} {probe.id}: {', '.join(parts)}"
 
 
 def format_report(report: ProbeReport) -> list[str]:

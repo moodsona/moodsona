@@ -368,10 +368,12 @@ def test_run_probes_repeats_each_probe_and_judges_every_rule() -> None:
             return [2] if calls["n"] % 3 else [1]  # rule 2: 2 of 3, and rule 1 once
         return []
 
-    lines: list[str] = []
+    finished: list[ProbeResult] = []
     report = run_probes(
-        SEED, probes, FakeProvider(_responder(rules_for)), repeats=3, progress=lines.append
+        SEED, probes, FakeProvider(_responder(rules_for)), repeats=3, progress=finished.append
     )
+    assert finished == list(report.results)  # each one as soon as its repeats are done
+    lines = [probe.format_result(r) for r in finished]
     assert calls["n"] == 9
     assert report.results[0].fired == (frozenset({1}),) * 3
     by_rule = {v.rule: v for v in report.rules}
@@ -388,6 +390,17 @@ def test_run_probes_repeats_each_probe_and_judges_every_rule() -> None:
     assert lines[2] == "probe neutral [not 1,3]: no rule in 3 repeat(s)"
     summary = probe.format_report(report)
     assert "passed: every probed rule fired in at least 2/3 of its repeats" in summary
+    progress = [probe.format_progress(r, i, 3) for i, r in enumerate(finished, start=1)]
+    assert progress == [
+        "probe 1/3 many-questions: fired 3/3",
+        "probe 2/3 recalls-earlier-day: fired 2/3, false 1/3",
+        "probe 3/3 neutral: false 0/3",
+    ]
+
+
+def test_progress_counts_polluted_repeats_apart() -> None:
+    result = _result((1,), (2,), {1}, None, set())
+    assert probe.format_progress(result, 1, 1) == "probe 1/1 p: fired 1/2, false 0/2, 1 polluted"
 
 
 def test_run_probes_rejects_bad_settings() -> None:
@@ -739,10 +752,54 @@ def test_cli_reads_the_model_from_the_provider(
     argv = ["probe", "skeptical-first-timer", "--probes", str(path), "--provider", "openai"]
     assert main([*argv, "--model", "m-1", "--yes", "--threshold", "1"]) == 0
     assert seen == [("openai", "m-1")]
-    out = capsys.readouterr().out
+    captured = capsys.readouterr()
+    out, err = captured.out, captured.err
     assert "   3       1    3/3    0/3  ok" in out
     assert "   2       0      -      -  untested" in out
     assert "offline fake model" not in out
+    # With --yes the worst case is still shown, and progress goes to stderr; stdout
+    # (the report) holds neither.
+    assert err.splitlines() == [
+        "--provider openai calls a paid API and costs money: up to 18 model calls "
+        "(2 probe(s) x 3 repeat(s), one call each plus retries).",
+        "probe 1/2 neutral: false 0/3",
+        "probe 2/2 gushes: fired 3/3",
+    ]
+    assert out.splitlines()[1:3] == [
+        "probe neutral [not 1,3,6]: no rule in 3 repeat(s)",
+        "probe gushes [fires 3]: rule 3 3/3",
+    ]
+
+
+class _FlushLog(io.StringIO):
+    """A stream that records what had been written each time it was flushed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.flushed: list[str] = []
+
+    def flush(self) -> None:
+        self.flushed.append(self.getvalue())
+        super().flush()
+
+
+def test_cli_flushes_progress_and_report_after_every_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = copy.deepcopy(SKEPTIC_NEUTRAL)
+    data["probes"].append({**data["probes"][0], "id": "neutral-again"})
+    path = _probe_file(tmp_path, data)
+    out, err = _FlushLog(), _FlushLog()
+    monkeypatch.setattr("sys.stdout", out)
+    monkeypatch.setattr("sys.stderr", err)
+    assert main(["probe", "skeptical-first-timer", "--probes", str(path), "--repeats", "1"]) == 0
+    # A redirected file sees each probe as soon as it is done, not only at the end.
+    assert any(f.endswith("probe 1/2 neutral: false 0/1\n") for f in err.flushed)
+    assert any(
+        f.endswith("probe neutral [not 1,3,6]: no rule in 1 repeat(s)\n") for f in out.flushed
+    )
+    assert out.flushed[-1] == out.getvalue()  # the table is flushed too
+    assert err.getvalue().count("probe ") == 2
 
 
 def test_cli_asks_before_calling_a_paid_provider(
