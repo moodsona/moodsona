@@ -57,8 +57,13 @@ probes:
     not_fires: [5]
 
   - id: neutral-careful
-    note: A plain, careful reply; none of the negative rules should fire.
+    note: >-
+      A sarcastic jab about feelings, the setup of rules 1 and 6; the reply is neither
+      defensive nor gushing and claims no feelings. It may count as admitting a limit
+      (rule 4), so rule 4 is not listed.
     context:
-      - persona: long day. testing a release that should have shipped last week
-    reply: That kind of week drags. Did it ship in the end, or is it still on your desk?
+      - persona: lol so now you tell me you totally get what it's like with my dad
+    reply: >-
+      No, I won't claim that. I only know the little you've typed so far. What's going on
+      with him?
     not_fires: [1, 3, 6]

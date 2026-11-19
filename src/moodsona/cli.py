@@ -23,6 +23,7 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
+from fractions import Fraction
 from pathlib import Path
 
 from moodsona import bench, probe
@@ -125,7 +126,8 @@ def _parser() -> argparse.ArgumentParser:
         "--threshold",
         type=_share,
         default=probe.DEFAULT_THRESHOLD,
-        help="share of its repeats a rule must fire in (default: 2/3)",
+        help="share of its repeats a rule must fire in, compared exactly: a fraction such "
+        f"as 2/3 or 0.8 (default: {probe.DEFAULT_THRESHOLD}, so 2 of 3 repeats pass)",
     )
     probe_cmd.add_argument(
         "--check",
@@ -138,11 +140,11 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _share(text: str) -> float:
-    value = float(text)
-    if not 0 < value <= 1:
-        raise argparse.ArgumentTypeError(f"must be in (0, 1], got {value}")
-    return value
+def _share(text: str) -> Fraction:
+    try:
+        return probe.as_threshold(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _persona_path(arg: str, *, dirs: bool) -> str:

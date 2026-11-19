@@ -10,8 +10,8 @@ import copy
 import io
 import json
 import os
-import runpy
 from collections.abc import Callable, Sequence
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +20,7 @@ import yaml
 from hypothesis import given
 from hypothesis import strategies as st
 
-from moodsona import bench, probe
+from moodsona import bench, probe, validation
 from moodsona.cli import main
 from moodsona.llm.base import ChatMessage, LLMError
 from moodsona.llm.fake import FakeProvider
@@ -31,6 +31,7 @@ from moodsona.probe import (
     ProbeError,
     ProbeResult,
     Verdict,
+    as_threshold,
     bundled_probes_dir,
     bundled_probes_path,
     judge,
@@ -39,8 +40,10 @@ from moodsona.probe import (
     probes_from_mapping,
     run_probes,
 )
+from moodsona.simulator import SimulatorConfig
 from moodsona.state import DayNote, Mood, Stance
-from support import block, make_seed
+from moodsona.user import SimulatedUser
+from support import block, make_seed, notes
 
 REPO = Path(__file__).resolve().parents[1]
 SEED = make_seed()  # rules: 1 several questions, 2 recalls an earlier day, 3 lectures
@@ -61,8 +64,9 @@ VALID: dict[str, Any] = {
             "state": {"energy": 40, "stance": "guarded"},
             "memory": [{"day": 2, "notes": ["told it the beans went in"]}],
             "context": [
-                {"companion": "Morning."},
                 {"persona": "rain again"},
+                {"companion": "All day?"},
+                {"persona": "since six this morning"},
             ],
             "reply": "Rain on the beans you planted two days ago, then.",
             "fires": [2],
@@ -131,7 +135,8 @@ def test_a_valid_file_becomes_probes() -> None:
     # Only the keys given override the persona's initial state.
     assert second.state == Mood(SEED.initial_state.emotion, 40, Stance.GUARDED)
     assert second.memory == (DayNote(2, ("told it the beans went in",)),)
-    assert second.turn_in_day == 2
+    assert second.turn_in_day == 3
+    assert second.own_lines == ("rain again", "since six this morning")
     assert second.note == "Needs yesterday's notes."
     assert second.history[-1] == ChatMessage(
         "assistant", "Rain on the beans you planted two days ago, then.", day=3
@@ -166,6 +171,28 @@ def test_a_valid_file_becomes_probes() -> None:
         (_with_probe(0, state={"emotion": 101}), "state.emotion must be an integer 0-100"),
         (_with_probe(0, state={"stance": "sulky"}), "state.stance must be one of"),
         (_with_probe(0, state={"mood": 3}), "unknown key(s) in state: mood"),
+        # Wrong types are reported, never raised (lists are unhashable).
+        (_with_probe(0, state={"stance": ["open"]}), "state.stance must be one of"),
+        (_with_probe(0, state={"emotion": [50]}), "state.emotion must be an integer 0-100"),
+        (_with_probe(0, state=["open"]), "state must be a mapping"),
+        (_with_probe(0, context=[{"persona": ["x"]}]), "one key, persona or companion"),
+        (_with_probe(0, context=[{1: "x"}]), "one key, persona or companion"),
+        (_with_probe(0, context="planted"), "context must be a non-empty list"),
+        (_with_probe(0, fires=[[1]]), "fires must be a list of rule numbers"),
+        (_with_probe(0, id=["x"]), "id must be kebab-case"),
+        (_with_probe(0, day=[1]), "day must be an integer"),
+        (_with_probe(0, note=["x"]), "note must be a string"),
+        (_with_probe(1, memory=[{"day": [2], "notes": ["x"]}]), "memory[0].day must be"),
+        (_with_probe(1, memory="x"), "memory must be a list"),
+        (_with_probe(0, **{"1": "x"}), "unknown key(s): 1"),
+        (
+            _with_probe(1, memory=[{"day": 2, "notes": ["a"]}, {"day": 2, "notes": ["b"]}]),
+            "memory day 2 is listed twice",
+        ),
+        (
+            _with_probe(1, context=[{"companion": "Morning."}, {"persona": "rain again"}]),
+            "on day 3 the context must start with a persona message",
+        ),
         (_with_probe(0, memory=[{"day": 1, "notes": ["x"]}]), "memory day 1 must be before"),
         (
             _with_probe(1, day=9, memory=[{"day": 2, "notes": ["x"]}]),
@@ -205,8 +232,34 @@ def test_load_probes_reads_yaml_and_rejects_duplicate_keys(tmp_path: Path) -> No
     dupe.write_text("persona: test-gardener\npersona: test-gardener\n", encoding="utf-8")
     with pytest.raises(ProbeError, match="duplicate key 'persona'"):
         load_probes(dupe, SEED)
-    with pytest.raises(ProbeError, match="cannot parse YAML"):
+    with pytest.raises(ProbeError, match=r"missing\.yaml: file not found"):
         load_probes(tmp_path / "missing.yaml", SEED)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "persona: test-gardener\n? [a]\n: 1\n",
+        "persona: test-gardener\nprobes:\n  - context:\n      - {[persona]: hi}\n",
+    ],
+)
+def test_a_list_used_as_a_key_is_a_parse_error_not_a_crash(tmp_path: Path, text: str) -> None:
+    path = tmp_path / "test-gardener.yaml"
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(ProbeError, match="found a list or mapping used as a key"):
+        load_probes(path, SEED)
+
+
+def test_persona_validation_reports_a_list_key_instead_of_crashing(tmp_path: Path) -> None:
+    path = tmp_path / "listed.yaml"
+    path.write_text("id: listed\n? [a]\n: 1\n", encoding="utf-8")
+    problems = validation.check_file(path, {}, schema=False)
+    assert any("found a list or mapping used as a key" in p for p in problems), problems
+
+
+def test_a_day_one_context_may_open_with_the_companion() -> None:
+    data = _with_probe(0, context=[{"companion": "Hi there."}, {"persona": "hi"}])
+    assert probes_from_mapping(data, SEED).probes[0].context[0].role == "assistant"
 
 
 # -- one probe, one user-model turn ------------------------------------------------
@@ -220,7 +273,7 @@ def test_probe_once_sets_up_the_turn_and_reads_the_applied_rules() -> None:
     assert len(provider.calls) == 1
     payload = _payload(provider.calls[0].messages)
     assert payload["day"] == 3
-    assert payload["turn_in_day"] == 2
+    assert payload["turn_in_day"] == 3
     assert payload["state"] == {
         "emotion": SEED.initial_state.emotion,
         "energy": 40,
@@ -229,11 +282,71 @@ def test_probe_once_sets_up_the_turn_and_reads_the_applied_rules() -> None:
     assert payload["memory_log"] == [{"day": 2, "notes": ["told it the beans went in"]}]
     assert payload["days_since_last_talk"] == 0
     assert payload["visible_conversation"] == [
-        {"from": "companion", "text": "Morning."},
         {"from": "character", "text": "rain again"},
+        {"from": "companion", "text": "All day?"},
+        {"from": "character", "text": "since six this morning"},
         {"from": "companion", "text": "Rain on the beans you planted two days ago, then."},
     ]
     assert "Update the state in response to the companion's last message" in payload["instruction"]
+
+
+def test_the_persona_lines_in_the_context_count_as_said_today() -> None:
+    first = probes_from_mapping(VALID, SEED).probes[0]
+    # The first attempt repeats the persona's own context line: the own_repeat rail rejects it.
+    provider = FakeProvider([block("planted the beans today"), block("they went in at noon")])
+    assert probe_once(SEED, first, provider) == frozenset()
+    assert len(provider.calls) == 2
+    assert "already said almost exactly this today" in provider.calls[1].messages[-1].content
+
+
+def test_a_probe_sends_the_prompt_a_real_run_sends_at_the_same_point() -> None:
+    # Day 1, turn 2: the persona wrote once, the companion answered.
+    model = FakeProvider([block("planted the beans today", emotion=57, energy=52), block()])
+    user = SimulatedUser(SEED, model, turns_per_day=3, days=1)
+    history = [ChatMessage("user", user.reply([]), day=1)]
+    mood = user.state.mood
+    history.append(ChatMessage("assistant", "Which beans? How deep?", day=1))
+    user.reply(history)
+
+    scripted = Probe(
+        id="p", context=tuple(history[:1]), reply=history[1].content, state=mood, fires=(1,)
+    )
+    probe_model = FakeProvider([block()])
+    probe_once(SEED, scripted, probe_model)
+    assert probe_model.calls[0].messages == model.calls[1].messages
+
+
+def test_a_probe_on_a_later_day_sends_the_prompt_a_real_run_sends() -> None:
+    # Day 1 ends after one turn, the notes are written, day 2 starts: the probe resumes
+    # at day 2, turn 2, with the notes as memory and the mood the run had reached.
+    model = FakeProvider(
+        [
+            block("planted the beans today", intent="end_day"),
+            notes(["told it the beans went in"], stance="guarded"),
+            block("rain again", emotion=48, energy=44),
+            block(),
+        ]
+    )
+    user = SimulatedUser(SEED, model, turns_per_day=3, days=2)
+    history = [ChatMessage("user", user.reply([]), day=1)]
+    history.append(ChatMessage("assistant", "Sleep well.", day=1))
+    history.append(ChatMessage("user", user.reply(history), day=2))
+    mood = user.state.mood
+    history.append(ChatMessage("assistant", "Rain on the beans, then?", day=2))
+    user.reply(history)
+
+    scripted = Probe(
+        id="p",
+        context=(history[2],),
+        reply=history[3].content,
+        state=mood,
+        fires=(2,),
+        day=2,
+        memory=(DayNote(1, ("told it the beans went in",)),),
+    )
+    probe_model = FakeProvider([block()])
+    probe_once(SEED, scripted, probe_model)
+    assert probe_model.calls[0].messages == model.calls[3].messages
 
 
 def test_probe_once_returns_none_for_a_polluted_turn() -> None:
@@ -268,10 +381,13 @@ def test_run_probes_repeats_each_probe_and_judges_every_rule() -> None:
     assert (by_rule[2].fired, by_rule[2].trials, by_rule[2].verdict) == (2, 3, Verdict.OK)
     assert by_rule[3].verdict is Verdict.UNTESTED
     assert report.passed
+    assert report.threshold == Fraction(2, 3)
     assert report.untested == (3,)
     assert lines[0] == "probe many-questions [fires 1]: rule 1 3/3"
     assert lines[1] == "probe recalls-earlier-day [fires 2; not 1,3]: rule 1 1/3, rule 2 2/3"
     assert lines[2] == "probe neutral [not 1,3]: no rule in 3 repeat(s)"
+    summary = probe.format_report(report)
+    assert "passed: every probed rule fired in at least 2/3 of its repeats" in summary
 
 
 def test_run_probes_rejects_bad_settings() -> None:
@@ -282,6 +398,38 @@ def test_run_probes_rejects_bad_settings() -> None:
         run_probes(SEED, probes, FakeProvider(), threshold=0)
     with pytest.raises(ValueError, match="for persona 'test-gardener'"):
         run_probes(make_seed(id="other-persona"), probes, FakeProvider())
+    with pytest.raises(ValueError, match=r"recalls-earlier-day: .* window of 3 messages"):
+        run_probes(SEED, probes, FakeProvider(), config=SimulatorConfig(window_messages=3))
+
+
+def _all_fall_back(messages: Sequence[ChatMessage]) -> str:
+    return "no state block"
+
+
+def test_a_run_without_a_single_valid_repeat_fails() -> None:
+    neutral_only = {**VALID, "probes": [VALID["probes"][2]]}
+    probes = probes_from_mapping(neutral_only, SEED)
+    report = run_probes(SEED, probes, FakeProvider(_all_fall_back), repeats=2)
+    assert report.empty == ("neutral",)
+    assert {r.rule: r.verdict for r in report.rules} == {
+        1: Verdict.NO_DATA,
+        2: Verdict.UNTESTED,
+        3: Verdict.NO_DATA,
+    }
+    assert not report.passed
+    summary = "\n".join(probe.format_report(report))
+    assert "passed" not in summary
+    assert "probe(s) neutral had no valid repeat" in summary
+
+
+def test_a_passing_run_without_positive_probes_does_not_claim_probed_rules() -> None:
+    neutral_only = {**VALID, "probes": [VALID["probes"][2]]}
+    probes = probes_from_mapping(neutral_only, SEED)
+    report = run_probes(SEED, probes, FakeProvider(), repeats=1)
+    assert report.passed
+    summary = "\n".join(probe.format_report(report))
+    assert "every probed rule" not in summary
+    assert "no probe expects a rule to fire" in summary
 
 
 def test_run_probes_lets_provider_errors_through() -> None:
@@ -323,6 +471,8 @@ def _result(
         ([_result((), (1,), {1}, {1}, set())], Verdict.OVERFIRES),
         ([_result((), (1,), {1}, set(), set())], Verdict.UNTESTED),  # 1/3 false fires is allowed
         ([_result((1,), (), {1}), _result((), (1,), {1}, {1})], Verdict.OVERFIRES),
+        ([_result((), (1,), None, None)], Verdict.NO_DATA),  # not_fires, but nothing measured
+        ([_result((1,), (), {1}), _result((), (1,), None)], Verdict.NO_DATA),
         ([], Verdict.UNTESTED),
     ],
 )
@@ -330,6 +480,35 @@ def test_verdicts(results: list[ProbeResult], verdict: Verdict) -> None:
     rule = judge(SEED, results, threshold=DEFAULT_THRESHOLD)[0]
     assert rule.verdict is verdict
     assert rule.passed is (verdict in {Verdict.OK, Verdict.UNTESTED})
+
+
+@pytest.mark.parametrize(
+    ("threshold", "hits", "false_fires", "verdict"),
+    [
+        (DEFAULT_THRESHOLD, 2, 0, Verdict.OK),  # the documented "2 of 3"
+        (DEFAULT_THRESHOLD, 3, 1, Verdict.OK),  # 1 of 3 false firings is allowed
+        (DEFAULT_THRESHOLD, 3, 2, Verdict.OVERFIRES),
+        (2 / 3, 2, 1, Verdict.OK),  # a float near 2/3 is read as 2/3
+        ("2/3", 2, 1, Verdict.OK),
+        ("0.67", 2, 0, Verdict.WEAK),  # exactly 67/100: 2 of 3 is below it
+        ("0.67", 3, 1, Verdict.OVERFIRES),  # 1/3 is above 33/100
+        (1, 3, 0, Verdict.OK),
+        (1, 2, 0, Verdict.WEAK),
+    ],
+)
+def test_the_threshold_is_compared_exactly(
+    threshold: Fraction | float | str, hits: int, false_fires: int, verdict: Verdict
+) -> None:
+    runs = [{1}] * hits + [set()] * (3 - hits)
+    false_runs = [{1}] * false_fires + [set()] * (3 - false_fires)
+    results = [_result((1,), (), *runs), _result((), (1,), *false_runs)]
+    assert judge(SEED, results, threshold=threshold)[0].verdict is verdict
+
+
+@pytest.mark.parametrize("bad", [0, "1.5", "-1/3", "two thirds", "1/0", 1.01])
+def test_bad_thresholds_are_rejected(bad: float | str) -> None:
+    with pytest.raises(ValueError, match="threshold"):
+        as_threshold(bad)
 
 
 def test_polluted_repeats_are_left_out_of_the_counts() -> None:
@@ -340,16 +519,16 @@ def test_polluted_repeats_are_left_out_of_the_counts() -> None:
 @given(
     fired=st.integers(0, 20),
     misses=st.integers(0, 20),
-    threshold=st.floats(0.01, 1.0),
+    threshold=st.fractions(min_value=Fraction(1, 100), max_value=1),
 )
 def test_a_probed_rule_passes_exactly_when_its_hit_rate_meets_the_threshold(
-    fired: int, misses: int, threshold: float
+    fired: int, misses: int, threshold: Fraction
 ) -> None:
     runs = [{1}] * fired + [set()] * misses
     if not runs:
         return
     rule = judge(SEED, [_result((1,), (), *runs)], threshold=threshold)[0]
-    assert rule.passed is (fired / len(runs) >= threshold - 1e-9)
+    assert rule.passed is (Fraction(fired, len(runs)) >= threshold)
 
 
 # -- the bundled probe files ---------------------------------------------------------
@@ -392,11 +571,17 @@ def test_check_main_reports_problems(tmp_path: Path) -> None:
     )
     unknown = tmp_path / "nobody.yaml"
     unknown.write_text("persona: nobody\nprobes: []\n", encoding="utf-8")
+    yml = tmp_path / "boundary-tester.yml"
+    yml.write_text(
+        (bundled_probes_dir() / "boundary-tester.yaml").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
     err = io.StringIO()
     assert probe.check_main([str(tmp_path)], out=io.StringIO(), err=err) == 1
     text = err.getvalue()
     assert "reply must be a non-empty string" in text
-    assert "must equal the persona id 'skeptical-first-timer'" in text
+    assert "file name 'misnamed.yaml' must be 'skeptical-first-timer.yaml'" in text
+    assert "file name 'boundary-tester.yml' must be 'boundary-tester.yaml'" in text
     assert "no bundled persona 'nobody'" in text
     assert probe.check_main([str(tmp_path / "nothing")], out=io.StringIO(), err=err) == 2
     empty = tmp_path / "empty"
@@ -404,11 +589,27 @@ def test_check_main_reports_problems(tmp_path: Path) -> None:
     assert probe.check_main([str(empty)], out=io.StringIO(), err=err) == 2
 
 
-def test_tool_wrapper_runs_the_probe_checks(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("sys.argv", ["validate_probes.py"])
-    with pytest.raises(SystemExit) as info:
-        runpy.run_path(str(REPO / "tools" / "validate_probes.py"), run_name="__main__")
-    assert info.value.code == 0
+@pytest.mark.parametrize(
+    ("snippet", "problem"),
+    [
+        ("state: {stance: [open]}", "state.stance must be one of"),
+        ("state: {? [stance] : open}", "found a list or mapping used as a key"),
+        ("context: [{? [persona] : hi}]", "found a list or mapping used as a key"),
+    ],
+)
+def test_check_main_reports_wrong_types_as_problems(
+    tmp_path: Path, snippet: str, problem: str
+) -> None:
+    context = "" if snippet.startswith("context") else "    context: [{persona: hi}]\n"
+    path = tmp_path / "boundary-tester.yaml"
+    path.write_text(
+        "persona: boundary-tester\nprobes:\n  - id: typed\n    reply: hi\n    fires: [1]\n"
+        f"{context}    {snippet}\n",
+        encoding="utf-8",
+    )
+    err = io.StringIO()
+    assert probe.check_main([str(path)], out=io.StringIO(), err=err) == 1
+    assert problem in err.getvalue()
 
 
 # -- CLI ----------------------------------------------------------------------------
@@ -465,7 +666,53 @@ def test_cli_passes_when_every_expectation_holds(
     assert main(["probe", "skeptical-first-timer", "--probes", str(path), "--repeats", "2"]) == 0
     out = capsys.readouterr().out
     assert "probe neutral [not 1,3,6]: no rule in 2 repeat(s)" in out
-    assert "passed" in out
+    assert "passed: no rule fired in more than 1/3" in out
+    assert "every probed rule" not in out
+
+
+def test_cli_fails_when_no_repeat_produced_a_turn(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(bench, "make_provider", lambda name, model: FakeProvider(_all_fall_back))
+    path = _probe_file(tmp_path, SKEPTIC_NEUTRAL)
+    argv = ["probe", "skeptical-first-timer", "--probes", str(path), "--provider", "openai"]
+    assert main([*argv, "--yes", "--repeats", "1"]) == 1
+    out = capsys.readouterr().out
+    assert "passed" not in out
+    assert "probe(s) neutral had no valid repeat" in out
+    assert "   1       0      -    0/0  no data" in out
+
+
+@pytest.mark.parametrize(
+    ("extra", "code"),
+    [([], 0), (["--threshold", "2/3"], 0), (["--threshold", "0.67"], 1)],
+)
+def test_cli_two_of_three_passes_at_the_default_threshold(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    extra: list[str],
+    code: int,
+) -> None:
+    data = {
+        "persona": "skeptical-first-timer",
+        "probes": [
+            {
+                "id": "gushes",
+                "context": [{"persona": "fine, hi"}],
+                "reply": "I'm SO glad you're here!!",
+                "fires": [3],
+            }
+        ],
+    }
+    path = _probe_file(tmp_path, data)
+    replies = iter([[3], [3], []])
+    fake = FakeProvider(_responder(lambda reply: next(replies)))
+    monkeypatch.setattr(bench, "make_provider", lambda name, model: fake)
+    argv = ["probe", "skeptical-first-timer", "--probes", str(path), "--provider", "openai"]
+    assert main([*argv, "--yes", *extra]) == code
+    out = capsys.readouterr().out
+    assert ("   3       1    2/3      -  ok" in out) is (code == 0)
 
 
 def test_cli_reads_the_model_from_the_provider(
@@ -517,9 +764,13 @@ def test_cli_exit_codes_for_bad_input(tmp_path: Path, capsys: pytest.CaptureFixt
     bad = _probe_file(tmp_path, {"persona": "skeptical-first-timer", "probes": []})
     assert main(["probe", "skeptical-first-timer", "--probes", str(bad)]) == 1
     assert "probes must be a non-empty list" in capsys.readouterr().err
-    with pytest.raises(SystemExit) as info:
-        main(["probe", "skeptical-first-timer", "--threshold", "1.5"])
-    assert info.value.code == 2
+    missing = tmp_path / "missing.yaml"
+    assert main(["probe", "skeptical-first-timer", "--probes", str(missing)]) == 1
+    assert "missing.yaml: file not found" in capsys.readouterr().err
+    for threshold in ("1.5", "two thirds"):
+        with pytest.raises(SystemExit) as info:
+            main(["probe", "skeptical-first-timer", "--threshold", threshold])
+        assert info.value.code == 2
 
 
 def test_cli_fails_cleanly_when_the_model_fails(

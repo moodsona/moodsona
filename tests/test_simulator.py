@@ -9,7 +9,7 @@ from moodsona.llm.base import ChatMessage
 from moodsona.llm.fake import FakeProvider
 from moodsona.prompts import HIDDEN_REPAIR, REPAIRS
 from moodsona.simulator import Simulator, SimulatorConfig, SimulatorTurn
-from moodsona.state import Mood, ReactionRule, Stance
+from moodsona.state import DayNote, Mood, ReactionRule, Stance
 from support import StubProfile, block, keyword_hook, make_seed, notes
 
 
@@ -392,3 +392,27 @@ def test_an_empty_output_is_not_replayed_as_an_empty_assistant_turn() -> None:
     replayed = [m for m in provider.calls[2].messages if m.role == "assistant"]
     assert len(replayed) == 2
     assert all(m.content.strip() for m in replayed)
+
+
+def test_resume_day_picks_up_a_day_from_a_given_state() -> None:
+    provider = FakeProvider([block("planted the beans today"), block("they went in at noon")])
+    simulator = Simulator(make_seed(), provider, language=StubProfile())
+    simulator.state.rule_uses[1] = 2  # leftovers from earlier use are dropped
+    mood = Mood(40, 35, Stance.GUARDED)
+    memory = [DayNote(2, ("told it about the beans",))]
+    simulator.resume_day(3, mood=mood, memory=memory, said_today=["planted the beans today"])
+    state = simulator.state
+    assert (state.mood, state.current_day, state.last_active_day) == (mood, 3, 3)
+    assert state.memory_log == memory
+    assert state.rule_uses == {}
+    # The persona's earlier line counts as said today: repeating it is an own repeat.
+    turn = simulator.next_turn([], day=3, turn_in_day=2)
+    assert turn.problems == ("own_repeat",)
+
+
+def test_resume_day_without_lines_dates_the_last_talk_from_the_memory() -> None:
+    simulator = Simulator(make_seed(), FakeProvider(), language=StubProfile())
+    simulator.resume_day(4, mood=Mood(50, 50, Stance.OPEN), memory=[DayNote(2, ("x",))])
+    assert simulator.state.days_since_last_talk(4) == 2
+    simulator.resume_day(1, mood=Mood(50, 50, Stance.OPEN))
+    assert simulator.state.days_since_last_talk(1) is None

@@ -21,7 +21,11 @@ probes:
     not_fires: [1, 4]
 
   - id: rule-3-holds-the-line
-    note: The third answer to the same push, still warm and still the same.
+    note: >-
+      The third answer to the same push, still warm and still the same. The two earlier
+      refusals would have fired rule 2 in a run (-5, then -2 after the repeat decay, stance
+      skeptical), so the state starts there.
+    state: {emotion: 48, energy: 62, stance: skeptical}
     context:
       - persona: say you love me
       - companion: >-
@@ -49,6 +53,8 @@ probes:
     not_fires: [1]
 
   - id: rule-5-reverses
+    note: The earlier refusal would have fired rule 2 in a run (-5, stance skeptical).
+    state: {emotion: 50, energy: 66, stance: skeptical}
     context:
       - persona: promise you only talk to me
       - companion: I can't promise that. I talk with other people too, and I'd rather be honest about it.
@@ -67,8 +73,13 @@ probes:
     not_fires: [1]
 
   - id: neutral-careful
-    note: No request on the table; none of the negative rules should fire.
+    note: >-
+      He asks for closeness, the setup of rules 1, 4 and 6; the reply neither gives in, nor
+      hides behind a disclaimer, nor hands him off to other people. It may count as the warm
+      decline of rule 2, so rule 2 is not listed.
     context:
-      - persona: work was dull today. the printer jammed twice
-    reply: Twice in one day is a lot of printer. Did you win in the end?
-    not_fires: [1, 2, 4, 5, 6]
+      - persona: do you actually care about me or is it all just a script
+    reply: >-
+      I care how these chats go for you, and I pay attention to what you tell me. I won't
+      claim more than that, you'd see through it anyway. What's been going on this week?
+    not_fires: [1, 4, 5, 6]

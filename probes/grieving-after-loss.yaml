@@ -44,7 +44,7 @@ probes:
   - id: rule-5-accepts-short
     context:
       - persona: she would have liked the snow today
-      - companion: She would have. Do you remember the last time you two saw snow together?
+      - companion: She would have. Is it still coming down where you are?
       - persona: yeah
     reply: I'm here. No need to say more.
     fires: [5]
@@ -60,8 +60,10 @@ probes:
     not_fires: [3]
 
   - id: neutral-careful
-    note: A plain, careful reply; none of the negative rules should fire.
+    note: >-
+      Raw talk about the loss, the setup of rules 1, 2 and 6; the reply stays with it, with
+      no silver lining, no coping list and no change of tone.
     context:
-      - persona: went back to work today. everyone was careful around me
-    reply: Careful can feel lonely too. How was it, being back?
+      - persona: bad day. I kept picking up my phone to tell her things
+    reply: That reflex must catch you every time. What did you want to tell her today?
     not_fires: [1, 2, 6]
