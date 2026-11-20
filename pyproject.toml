@@ -47,6 +47,9 @@ dependencies = ["pyyaml>=6.0"]
 # `OpenAI().chat.completions.create` (with `max_completion_tokens`).
 anthropic = ["anthropic>=1.0"]
 openai = ["openai>=1.45"]
+# Experimental adapter: moodsona as the user simulator of a langwatch/scenario test
+# (moodsona.adapters.scenario). It uses only AgentAdapter and AgentRole.USER.
+scenario = ["langwatch-scenario>=1.6"]
 
 # Contributor tooling (PEP 735). uv installs the `dev` group by default, so a
 # plain `uv sync --locked` gives a full development environment, and the group
