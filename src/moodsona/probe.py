@@ -66,7 +66,7 @@ from moodsona.llm.base import ChatMessage, LLMProvider, Role
 from moodsona.personas import load_bundled_persona
 from moodsona.simulator import SafetyHook, Simulator, SimulatorConfig
 from moodsona.state import DayNote, Mood, PersonaSeed, Stance
-from moodsona.validation import CONTACT_PATTERNS, UniqueKeyLoader, iter_files, looks_like_phone
+from moodsona.validation import CONTACT_PATTERNS, _UniqueKeyLoader, iter_files, looks_like_phone
 
 if TYPE_CHECKING:
     from moodsona.lang.base import LanguageProfile
@@ -74,7 +74,6 @@ if TYPE_CHECKING:
 __all__ = [
     "DEFAULT_REPEATS",
     "DEFAULT_THRESHOLD",
-    "PROBE_SUFFIX",
     "Probe",
     "ProbeError",
     "ProbeReport",
@@ -82,17 +81,10 @@ __all__ = [
     "ProbeSet",
     "RuleVerdict",
     "Verdict",
-    "as_threshold",
     "bundled_probes_dir",
     "bundled_probes_path",
-    "check_main",
-    "format_coverage",
-    "format_progress",
-    "format_report",
-    "format_result",
     "judge",
     "load_probes",
-    "max_model_calls",
     "probe_once",
     "probes_from_mapping",
     "run_probes",
@@ -103,7 +95,7 @@ DEFAULT_REPEATS = 3
 #: Share of a rule's repeats it must fire in (and at most ``1 -`` this on ``not_fires``).
 DEFAULT_THRESHOLD = Fraction(2, 3)
 #: File suffix of probe files: ``<persona id>.yaml``.
-PROBE_SUFFIX = ".yaml"
+_PROBE_SUFFIX = ".yaml"
 
 _ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _TOP_KEYS = frozenset({"persona", "probes"})
@@ -127,7 +119,7 @@ class ProbeError(ValueError):
         self.problems = problems
 
 
-def as_threshold(value: Fraction | float | str) -> Fraction:
+def _as_threshold(value: Fraction | float | str) -> Fraction:
     """A threshold as an exact fraction in (0, 1].
 
     Args:
@@ -352,7 +344,7 @@ def bundled_probes_path(persona_id: str) -> Path:
         KeyError: There is no bundled probe file for that persona.
         FileNotFoundError: The bundled probes directory is missing (a broken install).
     """
-    path = bundled_probes_dir() / f"{persona_id}{PROBE_SUFFIX}"
+    path = bundled_probes_dir() / f"{persona_id}{_PROBE_SUFFIX}"
     if not path.is_file():
         raise KeyError(f"no probe file for persona {persona_id!r}")
     return path
@@ -371,7 +363,7 @@ def _read_yaml(path: Path) -> Any:
     except (OSError, UnicodeDecodeError) as exc:
         raise ProbeError(str(path), [f"cannot read the file: {exc}"]) from exc
     try:
-        return yaml.load(text, Loader=UniqueKeyLoader)  # noqa: S506 - SafeLoader subclass
+        return yaml.load(text, Loader=_UniqueKeyLoader)  # noqa: S506 - SafeLoader subclass
     except yaml.YAMLError as exc:
         raise ProbeError(str(path), [f"cannot parse YAML: {exc}"]) from exc
 
@@ -705,8 +697,10 @@ def judge(
     Args:
         persona: The persona.
         results: The probe results.
-        threshold: The share of repeats a rule must fire in on its probes
-            (see :func:`as_threshold`).
+        threshold: The share of repeats a rule must fire in on its probes, in
+            (0, 1]: a fraction, an int, or a string such as ``"2/3"`` or
+            ``"0.8"`` (read exactly); a float is read as the nearest fraction
+            with a denominator of at most 1000, so ``2 / 3`` becomes 2/3.
 
     Returns:
         The verdicts, in rule order.
@@ -714,7 +708,7 @@ def judge(
     Raises:
         ValueError: ``threshold`` is outside (0, 1].
     """
-    share = as_threshold(threshold)
+    share = _as_threshold(threshold)
     verdicts = []
     for number, rule in enumerate(persona.reaction_rules, start=1):
         positive = [r for r in results if number in r.probe.fires]
@@ -731,7 +725,7 @@ def judge(
     return tuple(verdicts)
 
 
-def max_model_calls(probes: int, repeats: int, config: SimulatorConfig | None = None) -> int:
+def _max_model_calls(probes: int, repeats: int, config: SimulatorConfig | None = None) -> int:
     """The most user-model calls a probe run can make (every attempt but the last fails)."""
     return probes * repeats * (config or SimulatorConfig()).max_attempts
 
@@ -763,12 +757,13 @@ def run_probes(
         repeats: Runs per probe; model output varies, so one run says little.
         threshold: The share of repeats, in (0, 1], a rule must fire in on its
             probes; it may fire in at most ``1 - threshold`` on the probes that
-            list it under ``not_fires``. Compared exactly (see :func:`as_threshold`).
+            list it under ``not_fires``. Compared exactly; accepts the same
+            forms as :func:`judge`.
         config: Optional simulator settings.
         language: Optional language profile.
         safety_hook: Optional crisis detector.
         progress: Called with each probe's result as soon as its repeats are
-            done (see :func:`format_result` and :func:`format_progress`).
+            done, e.g. to show how far a long run is.
 
     Returns:
         The report.
@@ -782,7 +777,7 @@ def run_probes(
     """
     if repeats < 1:
         raise ValueError(f"repeats must be at least 1, got {repeats}")
-    share = as_threshold(threshold)
+    share = _as_threshold(threshold)
     if probes.persona_id != persona.id:
         raise ValueError(f"these probes are for persona {probes.persona_id!r}, not {persona.id!r}")
     window = (config or SimulatorConfig()).window_messages
@@ -825,7 +820,7 @@ def _short(text: str) -> str:
     return text if len(text) <= _WHEN_WIDTH else text[: _WHEN_WIDTH - 3].rstrip() + "..."
 
 
-def format_result(result: ProbeResult) -> str:
+def _format_result(result: ProbeResult) -> str:
     """One line per probe: what it expects and which rules fired in how many repeats."""
     probe = result.probe
     expects = "; ".join(
@@ -842,7 +837,7 @@ def format_result(result: ProbeResult) -> str:
     return line + (f", {result.polluted} polluted" if result.polluted else "")
 
 
-def format_progress(result: ProbeResult, done: int, total: int) -> str:
+def _format_progress(result: ProbeResult, done: int, total: int) -> str:
     """A short progress line for a finished probe, e.g. ``probe 3/12 neutral: false 0/3``.
 
     ``fired`` counts the valid repeats in which every rule of ``fires`` fired,
@@ -865,7 +860,7 @@ def format_progress(result: ProbeResult, done: int, total: int) -> str:
     return f"probe {done}/{total} {probe.id}: {', '.join(parts)}"
 
 
-def format_report(report: ProbeReport) -> list[str]:
+def _format_report(report: ProbeReport) -> list[str]:
     """The per-rule table and the summary lines of a probe run."""
     lines = [f"{'rule':>4}  {'probes':>6}  {'fired':>5}  {'false':>5}  {'verdict':<9}  when"]
     for r in report.rules:
@@ -902,7 +897,7 @@ def format_report(report: ProbeReport) -> list[str]:
     return lines
 
 
-def format_coverage(persona: PersonaSeed, probes: ProbeSet) -> list[str]:
+def _format_coverage(persona: PersonaSeed, probes: ProbeSet) -> list[str]:
     """Per rule, how many probes expect it to fire and how many expect it not to."""
     lines = [
         f"{probes.source}: {len(probes.probes)} probe(s) for persona {persona.id}, 0 problem(s)",
@@ -931,11 +926,11 @@ def _check_file(path: Path) -> list[str]:
     if not isinstance(persona_id, str):
         return [f"{path}: needs a persona id (persona: <id>)"]
     problems = []
-    expected = f"{persona_id}{PROBE_SUFFIX}"
+    expected = f"{persona_id}{_PROBE_SUFFIX}"
     if path.name != expected:
         problems.append(
             f"{path}: file name {path.name!r} must be {expected!r} (the persona id "
-            f"{persona_id!r} plus {PROBE_SUFFIX})"
+            f"{persona_id!r} plus {_PROBE_SUFFIX})"
         )
     try:
         probes_from_mapping(load_bundled_persona(persona_id), data, source=str(path))
@@ -948,7 +943,9 @@ def _check_file(path: Path) -> list[str]:
     return problems
 
 
-def check_main(argv: Sequence[str], *, out: TextIO | None = None, err: TextIO | None = None) -> int:
+def _check_main(
+    argv: Sequence[str], *, out: TextIO | None = None, err: TextIO | None = None
+) -> int:
     """Check probe files against the bundled personas they name, offline.
 
     Every file must parse, name a bundled persona (``persona: <id>``), be

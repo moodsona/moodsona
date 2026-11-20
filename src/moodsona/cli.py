@@ -142,7 +142,7 @@ def _parser() -> argparse.ArgumentParser:
 
 def _share(text: str) -> Fraction:
     try:
-        return probe.as_threshold(text)
+        return probe._as_threshold(text)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
@@ -325,11 +325,11 @@ def _probe(args: argparse.Namespace) -> int:
         err.write(f"{exc}\n")
         return 1
     if args.check:
-        out.write("\n".join(probe.format_coverage(persona, probes)) + "\n")
+        out.write("\n".join(probe._format_coverage(persona, probes)) + "\n")
         return 0
     total = len(probes.probes)
     if args.provider != "fake":
-        calls = probe.max_model_calls(total, args.repeats)
+        calls = probe._max_model_calls(total, args.repeats)
         cost = (
             f"--provider {args.provider} calls a paid API and costs money: up to {calls} model "
             f"calls ({total} probe(s) x {args.repeats} repeat(s), one call each plus retries)."
@@ -346,9 +346,9 @@ def _probe(args: argparse.Namespace) -> int:
         # report still shows how far the run is. Both are flushed per probe.
         nonlocal finished
         finished += 1
-        out.write(f"{probe.format_result(result)}\n")
+        out.write(f"{probe._format_result(result)}\n")
         out.flush()
-        err.write(f"{probe.format_progress(result, finished, total)}\n")
+        err.write(f"{probe._format_progress(result, finished, total)}\n")
         err.flush()
 
     try:
@@ -373,7 +373,7 @@ def _probe(args: argparse.Namespace) -> int:
     except (LookupError, LLMError) as exc:  # LLMError: e.g. the SDK is not installed
         err.write(f"{exc}\n")
         return 1
-    out.write("\n".join(probe.format_report(report)) + "\n")
+    out.write("\n".join(probe._format_report(report)) + "\n")
     out.flush()
     return 0 if report.passed else 1
 

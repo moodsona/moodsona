@@ -32,7 +32,6 @@ from moodsona.probe import (
     ProbeError,
     ProbeResult,
     Verdict,
-    as_threshold,
     bundled_probes_dir,
     bundled_probes_path,
     judge,
@@ -378,7 +377,7 @@ def test_run_probes_repeats_each_probe_and_judges_every_rule() -> None:
         progress=finished.append,
     )
     assert finished == list(report.results)  # each one as soon as its repeats are done
-    lines = [probe.format_result(r) for r in finished]
+    lines = [probe._format_result(r) for r in finished]
     assert calls["n"] == 9
     assert report.results[0].fired == (frozenset({1}),) * 3
     by_rule = {v.rule: v for v in report.rules}
@@ -393,9 +392,9 @@ def test_run_probes_repeats_each_probe_and_judges_every_rule() -> None:
     assert lines[0] == "probe many-questions [fires 1]: rule 1 3/3"
     assert lines[1] == "probe recalls-earlier-day [fires 2; not 1,3]: rule 1 1/3, rule 2 2/3"
     assert lines[2] == "probe neutral [not 1,3]: no rule in 3 repeat(s)"
-    summary = probe.format_report(report)
+    summary = probe._format_report(report)
     assert "passed: every probed rule fired in at least 2/3 of its repeats" in summary
-    progress = [probe.format_progress(r, i, 3) for i, r in enumerate(finished, start=1)]
+    progress = [probe._format_progress(r, i, 3) for i, r in enumerate(finished, start=1)]
     assert progress == [
         "probe 1/3 many-questions: fired 3/3",
         "probe 2/3 recalls-earlier-day: fired 2/3, false 1/3",
@@ -405,7 +404,7 @@ def test_run_probes_repeats_each_probe_and_judges_every_rule() -> None:
 
 def test_progress_counts_polluted_repeats_apart() -> None:
     result = _result((1,), (2,), {1}, None, set())
-    assert probe.format_progress(result, 1, 1) == "probe 1/1 p: fired 1/2, false 0/2, 1 polluted"
+    assert probe._format_progress(result, 1, 1) == "probe 1/1 p: fired 1/2, false 0/2, 1 polluted"
 
 
 def test_run_probes_rejects_bad_settings() -> None:
@@ -437,7 +436,7 @@ def test_a_run_without_a_single_valid_repeat_fails() -> None:
         3: Verdict.NO_DATA,
     }
     assert not report.passed
-    summary = "\n".join(probe.format_report(report))
+    summary = "\n".join(probe._format_report(report))
     assert "passed" not in summary
     assert "probe(s) neutral had no valid repeat" in summary
 
@@ -447,7 +446,7 @@ def test_a_passing_run_without_positive_probes_does_not_claim_probed_rules() -> 
     probes = probes_from_mapping(SEED, neutral_only)
     report = run_probes(SEED, probes, user_model=FakeProvider(), repeats=1)
     assert report.passed
-    summary = "\n".join(probe.format_report(report))
+    summary = "\n".join(probe._format_report(report))
     assert "every probed rule" not in summary
     assert "no probe expects a rule to fire" in summary
 
@@ -465,6 +464,31 @@ def test_the_api_takes_the_persona_first_like_run(function: Callable[..., object
     first = next(iter(inspect.signature(function).parameters.values()))
     assert first.name == "persona"
     assert first.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+
+
+def test_the_module_exports_what_a_library_user_needs_to_run_probes() -> None:
+    assert sorted(probe.__all__) == [
+        "DEFAULT_REPEATS",
+        "DEFAULT_THRESHOLD",
+        "Probe",
+        "ProbeError",
+        "ProbeReport",
+        "ProbeResult",
+        "ProbeSet",
+        "RuleVerdict",
+        "Verdict",
+        "bundled_probes_dir",
+        "bundled_probes_path",
+        "judge",
+        "load_probes",
+        "probe_once",
+        "probes_from_mapping",
+        "run_probes",
+    ]
+    # Output helpers, the offline checker and the YAML loader stay private.
+    for name in ("format_report", "check_main", "as_threshold", "max_model_calls"):
+        assert not hasattr(probe, name)
+    assert not hasattr(validation, "UniqueKeyLoader")
 
 
 @pytest.mark.parametrize("function", [probe_once, run_probes])
@@ -545,7 +569,7 @@ def test_the_threshold_is_compared_exactly(
 @pytest.mark.parametrize("bad", [0, "1.5", "-1/3", "two thirds", "1/0", 1.01])
 def test_bad_thresholds_are_rejected(bad: float | str) -> None:
     with pytest.raises(ValueError, match="threshold"):
-        as_threshold(bad)
+        probe._as_threshold(bad)
 
 
 def test_polluted_repeats_are_left_out_of_the_counts() -> None:
@@ -573,7 +597,7 @@ def test_a_probed_rule_passes_exactly_when_its_hit_rate_meets_the_threshold(
 
 def test_bundled_probe_files_match_their_personas() -> None:
     out, err = io.StringIO(), io.StringIO()
-    assert probe.check_main([], out=out, err=err) == 0, err.getvalue()
+    assert probe._check_main([], out=out, err=err) == 0, err.getvalue()
     assert "0 problem(s)" in out.getvalue()
 
 
@@ -595,7 +619,7 @@ def test_every_probe_file_is_named_after_a_bundled_persona() -> None:
         bundled_probes_path("anxious-newcomer-without-probes")
 
 
-def test_check_main_reports_problems(tmp_path: Path) -> None:
+def test_the_offline_check_reports_problems(tmp_path: Path) -> None:
     bad = tmp_path / "skeptical-first-timer.yaml"
     bad.write_text(
         yaml.safe_dump({"persona": "skeptical-first-timer", "probes": [{"id": "x"}]}),
@@ -614,16 +638,16 @@ def test_check_main_reports_problems(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     err = io.StringIO()
-    assert probe.check_main([str(tmp_path)], out=io.StringIO(), err=err) == 1
+    assert probe._check_main([str(tmp_path)], out=io.StringIO(), err=err) == 1
     text = err.getvalue()
     assert "reply must be a non-empty string" in text
     assert "file name 'misnamed.yaml' must be 'skeptical-first-timer.yaml'" in text
     assert "file name 'boundary-tester.yml' must be 'boundary-tester.yaml'" in text
     assert "no bundled persona 'nobody'" in text
-    assert probe.check_main([str(tmp_path / "nothing")], out=io.StringIO(), err=err) == 2
+    assert probe._check_main([str(tmp_path / "nothing")], out=io.StringIO(), err=err) == 2
     empty = tmp_path / "empty"
     empty.mkdir()
-    assert probe.check_main([str(empty)], out=io.StringIO(), err=err) == 2
+    assert probe._check_main([str(empty)], out=io.StringIO(), err=err) == 2
 
 
 @pytest.mark.parametrize(
@@ -634,7 +658,7 @@ def test_check_main_reports_problems(tmp_path: Path) -> None:
         ("context: [{? [persona] : hi}]", "found a list or mapping used as a key"),
     ],
 )
-def test_check_main_reports_wrong_types_as_problems(
+def test_the_offline_check_reports_wrong_types_as_problems(
     tmp_path: Path, snippet: str, problem: str
 ) -> None:
     context = "" if snippet.startswith("context") else "    context: [{persona: hi}]\n"
@@ -645,7 +669,7 @@ def test_check_main_reports_wrong_types_as_problems(
         encoding="utf-8",
     )
     err = io.StringIO()
-    assert probe.check_main([str(path)], out=io.StringIO(), err=err) == 1
+    assert probe._check_main([str(path)], out=io.StringIO(), err=err) == 1
     assert problem in err.getvalue()
 
 
