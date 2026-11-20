@@ -863,6 +863,12 @@ def _format_result(result: ProbeResult) -> str:
     return line + (f", {result.polluted} polluted" if result.polluted else "")
 
 
+def _format_dry_run(result: ProbeResult) -> str:
+    """One line per probe of a dry run: how many repeats produced a turn, nothing about rules."""
+    line = f"probe {result.probe.id}: {result.valid}/{len(result.fired)} repeat(s) produced a turn"
+    return line + (f", {result.polluted} polluted" if result.polluted else "")
+
+
 def _format_progress(result: ProbeResult, done: int, total: int) -> str:
     """A short progress line for a finished probe, e.g. ``probe 3/12 neutral: false 0/3``.
 

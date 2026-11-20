@@ -761,21 +761,56 @@ def test_cli_check_reports_an_untested_rule(
     assert f"no probe expects rule(s) {every_rule} to fire" in capsys.readouterr().out
 
 
-def test_cli_with_the_fake_model_fails_every_positive_probe(
-    capsys: pytest.CaptureFixture[str],
+@pytest.mark.parametrize("persona_id", sorted(p.stem for p in bundled_probes_dir().glob("*.yaml")))
+def test_cli_with_the_fake_provider_is_a_dry_run_that_passes(
+    persona_id: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert main(["probe", "boundary-tester", "--repeats", "1"]) == 1
+    # The default command must be able to pass: the fake model cannot judge rules,
+    # so it only exercises loading, prompts and plumbing, and shows no verdicts.
+    assert main(["probe", persona_id, "--repeats", "1"]) == 0
     captured = capsys.readouterr()
-    assert "offline fake model" in captured.out
-    assert "never" in captured.out
-    assert "failed: rule 1 (never)" in captured.out
+    out = captured.out
+    count = len(
+        load_probes(load_bundled_persona(persona_id), bundled_probes_path(persona_id)).probes
+    )
+    assert (
+        "dry run: the fake provider cannot judge rules (it never reports one), so this "
+        "checks loading, prompts and plumbing only and shows no verdicts; pass "
+        "--provider anthropic or --provider openai for verdicts"
+    ) in out
+    assert out.count(": 1/1 repeat(s) produced a turn\n") == count
+    assert out.splitlines()[-1] == (
+        f"dry run done: {count} probe(s) x 1 repeat(s), every probe produced a turn; "
+        "no verdicts without a real --provider"
+    )
+    # No verdict table, no per-rule counts, no pass/fail summary.
+    for verdict_text in ("rule  probes", "passed", "failed", "(never)", "rule 1 "):
+        assert verdict_text not in out
+    assert captured.err == ""
+
+
+def test_cli_dry_run_fails_when_a_probe_never_produced_a_turn(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Every turn falling back to the neutral line is broken plumbing, not a verdict.
+    monkeypatch.setattr(bench, "make_provider", lambda name, model: FakeProvider(_all_fall_back))
+    path = _probe_file(tmp_path, SKEPTIC_NEUTRAL)
+    assert main(["probe", "skeptical-first-timer", "--probes", str(path), "--repeats", "2"]) == 1
+    out = capsys.readouterr().out
+    assert "probe neutral: 0/2 repeat(s) produced a turn, 2 polluted" in out
+    assert out.splitlines()[-1] == (
+        "dry run failed: probe(s) neutral had no valid repeat "
+        "(every turn fell back to the neutral line)"
+    )
 
 
 def test_cli_passes_when_every_expectation_holds(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(bench, "make_provider", lambda name, model: FakeProvider())
     path = _probe_file(tmp_path, SKEPTIC_NEUTRAL)
-    assert main(["probe", "skeptical-first-timer", "--probes", str(path), "--repeats", "2"]) == 0
+    argv = ["probe", "skeptical-first-timer", "--probes", str(path), "--provider", "openai"]
+    assert main([*argv, "--yes", "--repeats", "2"]) == 0
     out = capsys.readouterr().out
     assert "probe neutral [not 1,3,6]: no rule in 2 repeat(s)" in out
     assert "passed: no rule fired in more than 1/3" in out
@@ -888,10 +923,12 @@ def test_cli_flushes_progress_and_report_after_every_probe(
     data = copy.deepcopy(SKEPTIC_NEUTRAL)
     data["probes"].append({**data["probes"][0], "id": "neutral-again"})
     path = _probe_file(tmp_path, data)
+    monkeypatch.setattr(bench, "make_provider", lambda name, model: FakeProvider())
     out, err = _FlushLog(), _FlushLog()
     monkeypatch.setattr("sys.stdout", out)
     monkeypatch.setattr("sys.stderr", err)
-    assert main(["probe", "skeptical-first-timer", "--probes", str(path), "--repeats", "1"]) == 0
+    argv = ["probe", "skeptical-first-timer", "--probes", str(path), "--provider", "openai"]
+    assert main([*argv, "--yes", "--repeats", "1"]) == 0
     # A redirected file sees each probe as soon as it is done, not only at the end.
     assert any(f.endswith("probe 1/2 neutral: false 0/1\n") for f in err.flushed)
     assert any(
@@ -899,6 +936,19 @@ def test_cli_flushes_progress_and_report_after_every_probe(
     )
     assert out.flushed[-1] == out.getvalue()  # the table is flushed too
     assert err.getvalue().count("probe ") == 2
+
+
+def test_cli_dry_run_flushes_after_every_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = copy.deepcopy(SKEPTIC_NEUTRAL)
+    data["probes"].append({**data["probes"][0], "id": "neutral-again"})
+    path = _probe_file(tmp_path, data)
+    out = _FlushLog()
+    monkeypatch.setattr("sys.stdout", out)
+    assert main(["probe", "skeptical-first-timer", "--probes", str(path), "--repeats", "1"]) == 0
+    assert any(f.endswith("probe neutral: 1/1 repeat(s) produced a turn\n") for f in out.flushed)
+    assert out.flushed[-1] == out.getvalue()
 
 
 def test_cli_asks_before_calling_a_paid_provider(

@@ -337,6 +337,7 @@ just misses it and lists the rule under `not_fires`.
 
 ```bash
 moodsona probe grieving-after-loss --check     # offline: is the file valid, which rules are covered
+moodsona probe grieving-after-loss             # offline dry run with the fake provider: no verdicts
 moodsona probe grieving-after-loss --provider anthropic --yes          # 3 repeats per probe
 moodsona probe my-persona.yaml --probes my-probes.yaml --provider openai --model gpt-5-mini --yes
 ```
@@ -365,18 +366,25 @@ calls, and then one short line per finished probe, go to stderr, so a long
 run shows its progress even when the report is redirected to a file.
 
 `--threshold` is a fraction compared exactly: the default `2/3` passes 2 of
-3 repeats and tolerates 1 of 3 on `not_fires`; `0.67` would fail 2 of 3. The
-command exits with 1 when any rule fails or a probe has no valid repeat at
-all. A failing probe can also mean the probe's reply is not a clear example
-of the rule; read the reply before rewording the rule.
+3 repeats and tolerates 1 of 3 on `not_fires`; `0.67` would fail 2 of 3.
+With a real provider the command exits with 1 when any rule fails or a probe
+has no valid repeat at all. A failing probe can also mean the probe's reply
+is not a clear example of the rule; read the reply before rewording the
+rule.
 
 **Cost:** one user-model call per probe and repeat, plus a retry when a rail
 rejects the output: a file of 7 probes is about 21 calls with the default 3
 repeats. Like `bench`, the command prints the worst case and needs `--yes`
-before it calls a paid provider. The default `--provider fake` runs offline
-and costs nothing, but the fake model never names a rule, so every positive
-probe fails and the command exits with 1: use it, or `--check`, only to
-check the file and the plumbing.
+before it calls a paid provider.
+
+**Dry run:** the default `--provider fake` runs offline and costs nothing,
+but the fake model never names a rule, so it cannot judge one. With it the
+command is a dry run: it loads the persona and the probes, runs every repeat
+through the real prompt and rails, prints one line per probe with how many
+repeats produced a turn, says that verdicts need a real `--provider`, and
+shows no verdict table. It exits with 0 when every probe produced a turn,
+and with 1 when the probe file is missing or invalid or a probe never
+produced a turn (the plumbing is broken).
 
 Rule numbers are positions in `reaction_rules`, so reordering or inserting
 rules breaks the probes. Pre-commit checks that the numbers still exist when

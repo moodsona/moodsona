@@ -9,8 +9,10 @@ Exit codes:
     0: success.
     1: ``validate`` found problems, ``smoke`` could not load or run the persona,
        ``report`` could not read the transcript, ``bench`` failed, or ``probe``
-       could not load the persona or its probes, failed, or found a rule below
-       the threshold.
+       could not load the persona or its probes, failed, had a probe without a
+       single turn, or (with a real provider) found a rule below the
+       threshold. With the default fake provider ``probe`` is a dry run that
+       shows no verdicts.
     2: usage error (unknown command or bad arguments, printed by argparse; or
        ``validate`` got a missing path or found no persona file to check; or
        ``bench`` got an unknown persona; or ``bench`` or ``probe`` got a paid
@@ -339,6 +341,9 @@ def _probe(args: argparse.Namespace) -> int:
             return 2
         err.write(f"{cost}\n")
         err.flush()
+    # The fake model never reports a rule, so with it every positive probe would
+    # "fail": run a dry run that checks the plumbing and judges nothing.
+    dry_run = args.provider == "fake"
     finished = 0
 
     def show(result: probe.ProbeResult) -> None:
@@ -346,6 +351,10 @@ def _probe(args: argparse.Namespace) -> int:
         # report still shows how far the run is. Both are flushed per probe.
         nonlocal finished
         finished += 1
+        if dry_run:
+            out.write(f"{probe._format_dry_run(result)}\n")
+            out.flush()
+            return
         out.write(f"{probe._format_result(result)}\n")
         out.flush()
         err.write(f"{probe._format_progress(result, finished, total)}\n")
@@ -358,9 +367,11 @@ def _probe(args: argparse.Namespace) -> int:
             f"persona {persona.id}: {len(probes.probes)} probe(s) from {probes.source}, "
             f"{args.repeats} repeat(s), model {label}\n"
         )
-        if args.provider == "fake":
+        if dry_run:
             out.write(
-                "offline fake model: it never reports a rule, so this checks the plumbing only\n"
+                "dry run: the fake provider cannot judge rules (it never reports one), so this "
+                "checks loading, prompts and plumbing only and shows no verdicts; pass "
+                "--provider anthropic or --provider openai for verdicts\n"
             )
         report = probe.run_probes(
             persona,
@@ -373,9 +384,30 @@ def _probe(args: argparse.Namespace) -> int:
     except (LookupError, LLMError) as exc:  # LLMError: e.g. the SDK is not installed
         err.write(f"{exc}\n")
         return 1
+    if dry_run:
+        return _dry_run_summary(report, total)
     out.write("\n".join(probe._format_report(report)) + "\n")
     out.flush()
     return 0 if report.passed else 1
+
+
+def _dry_run_summary(report: probe.ProbeReport, total: int) -> int:
+    """Print the last line of a dry run; 1 when a probe never produced a turn."""
+    if report.empty:
+        line = (
+            f"dry run failed: probe(s) {', '.join(report.empty)} had no valid repeat "
+            "(every turn fell back to the neutral line)"
+        )
+        code = 1
+    else:
+        line = (
+            f"dry run done: {total} probe(s) x {report.repeats} repeat(s), every probe "
+            "produced a turn; no verdicts without a real --provider"
+        )
+        code = 0
+    sys.stdout.write(line + "\n")
+    sys.stdout.flush()
+    return code
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -83,7 +83,8 @@ usage error. Run `moodsona <command> --help` for options.
 fire on scripted bot replies that do what the rule describes, and do not fire
 on a neutral reply: one user-model turn per probe and repeat (3 by default),
 so a paid provider needs `--yes`. `--check` only validates the probe file and
-shows which rules it covers. Probe files and verdicts:
+shows which rules it covers; the default `--provider fake` is a dry run that
+checks the plumbing and shows no verdicts. Probe files and verdicts:
 [Rule probes](personas.md#rule-probes).
 
 ## Metrics
