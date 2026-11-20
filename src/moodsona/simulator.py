@@ -239,6 +239,9 @@ class Simulator:
     ) -> None:
         """Pick up ``day`` part-way through, from a given state instead of earlier turns.
 
+        EXPERIMENTAL, like the rule probes it was added for: its signature and
+        behaviour may change in a later 0.x release.
+
         For harnesses that replay a scripted conversation, such as the rule
         probes (:mod:`moodsona.probe`); call it instead of :meth:`start_day`.
         The persona's state is replaced: ``mood`` and the ``memory`` notes are

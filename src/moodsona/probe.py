@@ -1,4 +1,9 @@
-"""Rule probes: check, rule by rule, that a persona's reaction rules can fire.
+"""EXPERIMENTAL rule probes: check, rule by rule, that a persona's reaction rules can fire.
+
+This is a first cut: the probe API in this module, the ``moodsona probe``
+command's flags and output, and the probe file format may change in a later
+0.x release. Probe files carry a format ``version`` so that a file written
+for another format is rejected instead of misread.
 
 A persona's reaction rules are data: the user model reads the companion's last
 message and names the rules it triggered, and the code applies their deltas.

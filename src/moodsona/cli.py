@@ -105,8 +105,8 @@ def _parser() -> argparse.ArgumentParser:
     )
     probe_cmd = commands.add_parser(
         "probe",
-        help="check that each reaction rule fires on a scripted reply that does what it "
-        "describes (a real provider costs money)",
+        help="experimental: check that each reaction rule fires on a scripted reply that "
+        "does what it describes (a real provider costs money)",
     )
     probe_cmd.add_argument(
         "persona", help="path to a persona YAML file, or a bundled persona id (grieving-after-loss)"

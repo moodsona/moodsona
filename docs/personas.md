@@ -269,7 +269,12 @@ inner thoughts sound like this person, do the rules fire when you expect, and
 does the trajectory differ between a bot that makes your target mistake and
 one that does not?
 
-## Rule probes
+## Rule probes (experimental)
+
+Rule probes are a first cut: the probe API (`moodsona.probe`), the
+`moodsona probe` command's flags and output, and the probe file format may
+change in a later 0.x release. Probe files state their format `version`, so
+a file written for another format is rejected instead of misread.
 
 A rule only does something when the user model recognises the bot's
 behaviour in its `when`. A rule that never fires is dead weight, and a full
