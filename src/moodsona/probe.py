@@ -36,8 +36,8 @@ Verdicts per rule (``k/n`` counts repeats; a repeat whose turn fell back to the
 neutral line is left out): a rule with probes that expect it to fire must fire
 in at least ``threshold`` of those repeats (``weak`` below, ``never`` at 0); it
 may fire in at most ``1 - threshold`` of the repeats of probes that list it
-under ``not_fires`` (``overfires`` above). ``no data`` means the rule has
-probes, but none of their repeats produced a turn. A rule no probe expects to
+under ``not_fires`` (``overfires`` above). ``no_data`` (printed "no data")
+means the rule has probes, but none of their repeats produced a turn. A rule no probe expects to
 fire is ``untested``: reported, but not a failure. The threshold is an exact
 fraction (default 2/3, so 2 of 3 repeats pass), and a run also fails when a
 probe has no valid repeat at all.
@@ -235,12 +235,16 @@ class ProbeResult:
 
 
 class Verdict(StrEnum):
-    """How one rule did across its probes."""
+    """How one rule did across its probes (see the module docstring).
+
+    The values are identifiers; the printed report shows ``no_data`` as
+    "no data".
+    """
 
     OK = "ok"
     WEAK = "weak"
     NEVER = "never"
-    NO_DATA = "no data"
+    NO_DATA = "no_data"
     OVERFIRES = "overfires"
     UNTESTED = "untested"
 
@@ -255,9 +259,9 @@ class RuleVerdict:
         probes: How many probes expect it to fire.
         fired: Repeats of those probes in which it fired.
         trials: Repeats of those probes that produced a turn.
-        false_probes: How many probes list it under ``not_fires``.
-        false_fired: Repeats of those probes in which it fired anyway.
-        false_trials: Repeats of those probes that produced a turn.
+        negative_probes: How many probes list it under ``not_fires``.
+        negative_fired: Repeats of those probes in which it fired anyway.
+        negative_trials: Repeats of those probes that produced a turn.
         verdict: The verdict (see the module docstring).
     """
 
@@ -266,9 +270,9 @@ class RuleVerdict:
     probes: int
     fired: int
     trials: int
-    false_probes: int
-    false_fired: int
-    false_trials: int
+    negative_probes: int
+    negative_fired: int
+    negative_trials: int
     verdict: Verdict
 
     @property
@@ -666,9 +670,9 @@ def _verdict(
     probes: int,
     fired: int,
     trials: int,
-    false_probes: int,
-    false_fired: int,
-    false_trials: int,
+    negative_probes: int,
+    negative_fired: int,
+    negative_trials: int,
     threshold: Fraction,
 ) -> Verdict:
     if probes:
@@ -678,10 +682,10 @@ def _verdict(
             return Verdict.NEVER
         if Fraction(fired, trials) < threshold:
             return Verdict.WEAK
-    if false_probes:
-        if false_trials == 0:
+    if negative_probes:
+        if negative_trials == 0:
             return Verdict.NO_DATA
-        if Fraction(false_fired, false_trials) > 1 - threshold:
+        if Fraction(negative_fired, negative_trials) > 1 - threshold:
             return Verdict.OVERFIRES
     return Verdict.OK if probes else Verdict.UNTESTED
 
@@ -820,6 +824,11 @@ def _short(text: str) -> str:
     return text if len(text) <= _WHEN_WIDTH else text[: _WHEN_WIDTH - 3].rstrip() + "..."
 
 
+def _label(verdict: Verdict) -> str:
+    """A verdict as the report prints it: ``no_data`` becomes ``no data``."""
+    return verdict.value.replace("_", " ")
+
+
 def _format_result(result: ProbeResult) -> str:
     """One line per probe: what it expects and which rules fired in how many repeats."""
     probe = result.probe
@@ -865,15 +874,15 @@ def _format_report(report: ProbeReport) -> list[str]:
     lines = [f"{'rule':>4}  {'probes':>6}  {'fired':>5}  {'false':>5}  {'verdict':<9}  when"]
     for r in report.rules:
         fired = f"{r.fired}/{r.trials}" if r.probes else "-"
-        false = f"{r.false_fired}/{r.false_trials}" if r.false_probes else "-"
+        false = f"{r.negative_fired}/{r.negative_trials}" if r.negative_probes else "-"
         lines.append(
-            f"{r.rule:>4}  {r.probes:>6}  {fired:>5}  {false:>5}  {r.verdict.value:<9}  "
+            f"{r.rule:>4}  {r.probes:>6}  {fired:>5}  {false:>5}  {_label(r.verdict):<9}  "
             f"{_short(r.when)}"
         )
     hit, miss = report.threshold, 1 - report.threshold
     failures = []
     if report.failed:
-        failures.append(", ".join(f"rule {r.rule} ({r.verdict.value})" for r in report.failed))
+        failures.append(", ".join(f"rule {r.rule} ({_label(r.verdict)})" for r in report.failed))
     if report.empty:
         failures.append(
             f"probe(s) {', '.join(report.empty)} had no valid repeat "

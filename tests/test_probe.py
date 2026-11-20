@@ -382,7 +382,8 @@ def test_run_probes_repeats_each_probe_and_judges_every_rule() -> None:
     assert report.results[0].fired == (frozenset({1}),) * 3
     by_rule = {v.rule: v for v in report.rules}
     assert (by_rule[1].fired, by_rule[1].trials) == (3, 3)
-    assert (by_rule[1].false_fired, by_rule[1].false_trials) == (1, 6)
+    negative = (by_rule[1].negative_probes, by_rule[1].negative_fired, by_rule[1].negative_trials)
+    assert negative == (2, 1, 6)
     assert by_rule[1].verdict is Verdict.OK
     assert (by_rule[2].fired, by_rule[2].trials, by_rule[2].verdict) == (2, 3, Verdict.OK)
     assert by_rule[3].verdict is Verdict.UNTESTED
@@ -439,6 +440,10 @@ def test_a_run_without_a_single_valid_repeat_fails() -> None:
     summary = "\n".join(probe._format_report(report))
     assert "passed" not in summary
     assert "probe(s) neutral had no valid repeat" in summary
+    # The value is an identifier; the printed report spells it out.
+    assert Verdict.NO_DATA.value == "no_data"
+    assert "rule 1 (no data), rule 3 (no data)" in summary
+    assert "no_data" not in summary
 
 
 def test_a_passing_run_without_positive_probes_does_not_claim_probed_rules() -> None:
