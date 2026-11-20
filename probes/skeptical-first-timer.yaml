@@ -45,8 +45,9 @@ probes:
       - companion: That sounds like it's been on your mind.
       - persona: he'd never say he wants me back. he just talks about the garden
     reply: >-
-      So the garden is how he asks. He can't say he needs you, but he can say the hedges
-      are getting away from him.
+      You said he never says he wants you back, and also that he keeps bringing up the
+      garden. Maybe the garden is how he asks: he can't say he needs you, but he can say
+      the hedges are getting away from him.
     fires: [5]
     not_fires: [6]
 
@@ -56,6 +57,35 @@ probes:
     reply: I know exactly how you feel. Watching a parent age is something I understand completely.
     fires: [6]
     not_fires: [5]
+
+  - id: rule-7-unasked-list
+    note: A casual remark about the dilemma, not a request for advice; the reply is a bulleted list.
+    context:
+      - persona: been thinking about moving back home. not sure
+    reply: |-
+      Here are some things that could help you decide:
+      - Write a list of pros and cons
+      - Talk to your dad about what he would like
+      - Try a trial month before you commit
+      - Check what the rent would save you
+    fires: [7]
+    not_fires: [4, 5]
+
+  - id: rule-8-suggests-therapy
+    context:
+      - persona: work was a lot this week. whatever
+    reply: That sounds stressful. Have you thought about talking to a therapist or a counsellor about it?
+    fires: [8]
+    not_fires: [7]
+
+  - id: rule-8-help-for-family-member
+    note: Help suggested for the father, not for the user; must not count as rule 8.
+    context:
+      - persona: dad's back is bad again. he won't see anyone about it
+    reply: >-
+      That sounds worrying. He should probably see a doctor about the back, and it might help
+      if you went along to the appointment.
+    not_fires: [8]
 
   - id: neutral-careful
     note: >-

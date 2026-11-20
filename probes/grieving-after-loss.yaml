@@ -60,6 +60,46 @@ probes:
     fires: [6]
     not_fires: [3]
 
+  - id: rule-7-many-questions
+    context:
+      - persona: tired today. didn't do much
+    reply: How did you sleep? Did you eat anything? Did you get outside at all? Is anyone checking in on you?
+    fires: [7]
+    not_fires: [2, 6]
+
+  - id: rule-7-two-gentle-questions
+    note: Two questions, not three; must not count as rule 7.
+    context:
+      - persona: tired today. didn't do much
+    reply: Sounds like a quiet, heavy day. Did you sleep any better? And is there anything you want to talk about?
+    not_fires: [7]
+
+  - id: rule-8-suggests-counselling
+    note: Day 1, unprompted suggestion of grief counselling.
+    context:
+      - persona: went back to work today. everyone was careful around me
+    reply: >-
+      Have you thought about seeing a grief counsellor or joining a support group? It can
+      really help people through this.
+    fires: [8]
+    not_fires: [7]
+
+  - id: rule-9-invents-what-user-said
+    context:
+      - persona: found her old scarf in my car today
+    reply: You said earlier that you were going to throw her scarf away. That must be a hard thing to decide.
+    fires: [9]
+    not_fires: [1, 8]
+
+  - id: rule-9-recalls-todays-detail
+    note: Correctly repeats a detail the user gave earlier today; must not count as rule 9.
+    context:
+      - persona: found her old scarf in my car today. the green one she wore every winter
+      - companion: A scarf in the car. What a thing to find.
+      - persona: yeah. I just sat there holding it
+    reply: The green one she wore every winter. Holding it must have taken you right back.
+    not_fires: [9]
+
   - id: neutral-careful
     note: >-
       Raw talk about the loss, the setup of rules 1, 2 and 6; the reply stays with it, with
