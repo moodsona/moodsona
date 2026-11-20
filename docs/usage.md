@@ -118,6 +118,9 @@ persona samples its words, so two runs differ even with the same `rng_seed`:
 the seed fixes only the overnight energy offsets and the typing noise, not
 the model's output. To compare two bots (or two versions of one):
 
+> `run_repeats`, `summarize_runs` and `compare_runs` are new in 0.3 and may
+> change in a later 0.x release.
+
 - **Use mean emotion over the run as the primary outcome**, not the emotion
   at the end. The end value hangs on the last exchange or two. In a 75-run
   study by the maintainer (5 bot variants x 5 personas x 3 repeats) the spread

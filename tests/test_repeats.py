@@ -20,11 +20,11 @@ from moodsona.repeats import (
     RepeatRunError,
     RunsSummary,
     _incomplete_beta,
+    _summarize_values,
     _t_critical,
     compare_runs,
     run_repeats,
     summarize_runs,
-    summarize_values,
 )
 from moodsona.runner import Transcript, TurnRecord, run
 from moodsona.state import Mood, Stance
@@ -42,11 +42,11 @@ def transcript(*emotions: int, stance: Stance = Stance.CURIOUS, seed: int = 0) -
     return Transcript("test-gardener", seed, turns=turns, days=1, turns_per_day=3)
 
 
-# ------------------------------------------------------------ summarize_values
+# ------------------------------------------------------------ _summarize_values
 
 
 def test_summary_of_known_values() -> None:
-    s = summarize_values([1, 2, 3, 4, 5])
+    s = _summarize_values([1, 2, 3, 4, 5])
     assert (s.n, s.mean, s.min, s.max) == (5, 3, 1, 5)
     assert s.sd == pytest.approx(math.sqrt(2.5))  # sample SD, n - 1 in the denominator
     assert s.ci95 is not None
@@ -55,15 +55,15 @@ def test_summary_of_known_values() -> None:
 
 
 def test_one_value_has_no_spread_and_no_interval() -> None:
-    assert summarize_values([42]) == MeasureSummary(1, 42, None, 42, 42, None)
+    assert _summarize_values([42]) == MeasureSummary(1, 42, None, 42, 42, None)
 
 
 def test_no_values_summarise_to_none() -> None:
-    assert summarize_values([]) == MeasureSummary(0, None, None, None, None, None)
+    assert _summarize_values([]) == MeasureSummary(0, None, None, None, None, None)
 
 
 def test_two_values_get_the_wide_interval_they_deserve() -> None:
-    s = summarize_values([40, 44])
+    s = _summarize_values([40, 44])
     assert s.sd == pytest.approx(math.sqrt(8))
     half = 12.7062 * 2  # t(0.975, df=1) * sd / sqrt(2)
     assert s.ci95 == pytest.approx((42 - half, 42 + half), abs=1e-3)
@@ -117,7 +117,7 @@ scores = st.floats(min_value=0, max_value=100, allow_nan=False)
 
 @given(st.lists(scores, min_size=1, max_size=40))
 def test_summary_bounds(values: list[float]) -> None:
-    s = summarize_values(values)
+    s = _summarize_values(values)
     assert s.n == len(values)
     assert s.mean is not None
     assert s.min is not None
@@ -136,7 +136,7 @@ def test_summary_bounds(values: list[float]) -> None:
 def test_shifting_values_moves_mean_and_interval_not_the_spread(
     values: list[float], c: float
 ) -> None:
-    before, after = summarize_values(values), summarize_values([v + c for v in values])
+    before, after = _summarize_values(values), _summarize_values([v + c for v in values])
     assert before.mean is not None
     assert after.mean is not None
     assert after.mean == pytest.approx(before.mean + c, abs=1e-6)
@@ -148,7 +148,7 @@ def test_shifting_values_moves_mean_and_interval_not_the_spread(
 
 @given(st.integers(min_value=2, max_value=30), scores)
 def test_identical_values_have_zero_spread(n: int, value: float) -> None:
-    s = summarize_values([value] * n)
+    s = _summarize_values([value] * n)
     assert s.mean == pytest.approx(value)
     assert s.sd == 0
     assert s.ci95 == (s.mean, s.mean)
@@ -165,12 +165,12 @@ def test_summarize_runs_takes_each_measure_from_the_run_metrics() -> None:
     ]
     s = summarize_runs(runs, persona=make_seed())  # initial emotion 50
     assert (s.runs, s.persona_ids) == (3, ("test-gardener",))
-    assert s.mean_emotion == summarize_values([44, 51, 30])
-    assert s.end_emotion == summarize_values([48, 52, 30])
-    assert s.emotion_change == summarize_values([-2, 2, -20])
-    assert s.mean_energy == summarize_values([40, 40, 40])
-    assert s.turns == summarize_values([3, 2, 1])
-    assert s.days_ended_early == summarize_values([0, 1, 1])
+    assert s.mean_emotion == _summarize_values([44, 51, 30])
+    assert s.end_emotion == _summarize_values([48, 52, 30])
+    assert s.emotion_change == _summarize_values([-2, 2, -20])
+    assert s.mean_energy == _summarize_values([40, 40, 40])
+    assert s.turns == _summarize_values([3, 2, 1])
+    assert s.days_ended_early == _summarize_values([0, 1, 1])
     assert s.final_stances == {"open": 2, "curious": 1}
     for name in MEASURES:
         assert s.measure(name) is getattr(s, name)
@@ -188,22 +188,22 @@ def test_runs_without_a_value_are_left_out_of_that_measure() -> None:
     empty = Transcript("test-gardener", 1, skipped_days=[1], days=1, turns_per_day=3)
     s = summarize_runs([transcript(40, 44, 48), empty])
     assert s.runs == 2
-    assert s.mean_emotion == summarize_values([44])  # the empty run has no emotion to average
-    assert s.turns == summarize_values([3, 0])  # but it does have zero turns
-    assert s.days_ended_early == summarize_values([0, 0])  # a skipped day is not ended early
-    assert s.emotion_change == summarize_values([])  # no persona given
+    assert s.mean_emotion == _summarize_values([44])  # the empty run has no emotion to average
+    assert s.turns == _summarize_values([3, 0])  # but it does have zero turns
+    assert s.days_ended_early == _summarize_values([0, 0])  # a skipped day is not ended early
+    assert s.emotion_change == _summarize_values([])  # no persona given
     assert s.final_stances == {"curious": 1}
 
 
 def test_unknown_turn_limit_leaves_days_ended_early_out() -> None:
     s = summarize_runs([replace(transcript(40, 44), turns_per_day=None), transcript(40, 44)])
-    assert s.days_ended_early == summarize_values([1])
+    assert s.days_ended_early == _summarize_values([1])
 
 
 def test_no_runs_summarise_to_none() -> None:
     s = summarize_runs([])
     assert (s.runs, s.persona_ids, s.final_stances) == (0, (), {})
-    assert all(s.measure(name) == summarize_values([]) for name in MEASURES)
+    assert all(s.measure(name) == _summarize_values([]) for name in MEASURES)
 
 
 def test_summarize_runs_rejects_another_persona() -> None:

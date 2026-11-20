@@ -235,6 +235,9 @@ does not change that: it seeds only the overnight energy offset and the
 typing noise, and the same seed gives the same model output only with a
 deterministic user model such as `FakeProvider`.
 
+`run_repeats`, `summarize_runs` and `compare_runs` are new in 0.3 and may
+change in a later 0.x release.
+
 So compare companions on several repeats each, and on **mean emotion over the
 run** rather than the emotion at the end. In a 75-run study by the maintainer
 (5 bot variants x 5 personas x 3 repeats) the spread between repeats of one

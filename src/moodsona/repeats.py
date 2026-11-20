@@ -14,6 +14,9 @@ emotion over the run rather than the emotion at the end:
   10-point difference in mean emotion and about 10 for a 5-point one; with
   the end value, 10 points take about 14.
 
+`run_repeats`, `summarize_runs` and `compare_runs` are new in 0.3 and may
+change in a later 0.x release.
+
 So run 5 to 10 repeats per companion and report the spread::
 
     from moodsona.repeats import compare_runs, run_repeats, summarize_runs
@@ -70,7 +73,6 @@ __all__ = [
     "compare_runs",
     "run_repeats",
     "summarize_runs",
-    "summarize_values",
 ]
 
 #: Each per-run measure and how to read it from a run's metrics.
@@ -172,7 +174,7 @@ class MeasureSummary:
     ci95: tuple[float, float] | None
 
 
-def summarize_values(values: Iterable[float]) -> MeasureSummary:
+def _summarize_values(values: Iterable[float]) -> MeasureSummary:
     """Summarise one measure over runs: mean, sample SD, min, max, 95 % interval.
 
     Args:
@@ -197,7 +199,7 @@ class RunsSummary:
     """Per-run measures over a set of runs, usually repeats of one persona and companion.
 
     Each measure is the :mod:`moodsona.metrics` value of every run, summarised
-    with :func:`summarize_values`. A run without a value for a measure (no
+    with :func:`_summarize_values`. A run without a value for a measure (no
     messages, say) is left out of that measure only, so ``n`` can differ
     between measures.
 
@@ -300,7 +302,7 @@ def summarize_runs(
 
     def over_runs(name: str) -> MeasureSummary:
         get = _GETTERS[name]
-        return summarize_values(v for m in metrics if (v := get(m)) is not None)
+        return _summarize_values(v for m in metrics if (v := get(m)) is not None)
 
     stances = Counter(m.final_stance for m in metrics if m.final_stance is not None)
     return RunsSummary(
