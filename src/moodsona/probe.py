@@ -43,10 +43,25 @@ neutral line is left out): a rule with probes that expect it to fire must fire
 in at least ``threshold`` of those repeats (``weak`` below, ``never`` at 0); it
 may fire in at most ``1 - threshold`` of the repeats of probes that list it
 under ``not_fires`` (``overfires`` above). ``no_data`` (printed "no data")
-means the rule has probes, but none of their repeats produced a turn. A rule no probe expects to
-fire is ``untested``: reported, but not a failure. The threshold is an exact
-fraction (default 2/3, so 2 of 3 repeats pass), and a run also fails when a
-probe has no valid repeat at all.
+means the rule has probes, but none of their repeats produced a turn. A rule
+no probe expects to fire is ``untested``: reported, but not a failure. The
+threshold is an exact fraction (default 2/3, so 2 of 3 repeats pass), and a
+run also fails when a probe has no valid repeat at all.
+
+From Python::
+
+    from moodsona import load_bundled_persona
+    from moodsona.llm.anthropic import AnthropicProvider
+    from moodsona.probe import bundled_probes_path, load_probes, run_probes
+
+    persona = load_bundled_persona("grieving-after-loss")
+    probes = load_probes(persona, bundled_probes_path(persona.id))
+    report = run_probes(persona, probes, user_model=AnthropicProvider(), repeats=3)
+    for rule in report.failed:
+        print(rule.rule, rule.verdict, rule.when)
+
+:class:`~moodsona.llm.FakeProvider` never reports a rule, so with it every
+probed rule fails: use it only to check the plumbing.
 
 Cost: every probe repeat is one user-model call, plus up to
 ``SimulatorConfig.max_attempts - 1`` more when a rail rejects the output.
@@ -669,7 +684,7 @@ def probe_once(
 
     Raises:
         LookupError: No language profile covers the persona's language.
-        moodsona.llm.LLMError: The provider failed.
+        moodsona.llm.LLMError: The user model failed.
     """
     simulator = Simulator(
         persona,
@@ -799,7 +814,7 @@ def run_probes(
             the probes are for another persona, or a probe does not fit in the
             simulator's window (``config.window_messages``).
         LookupError: No language profile covers the persona's language.
-        moodsona.llm.LLMError: The provider failed.
+        moodsona.llm.LLMError: The user model failed.
     """
     if repeats < 1:
         raise ValueError(f"repeats must be at least 1, got {repeats}")
