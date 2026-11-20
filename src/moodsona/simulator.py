@@ -44,6 +44,7 @@ from moodsona.state import (
     AppliedRule,
     DayNote,
     Intent,
+    Mood,
     PersonaSeed,
     PersonaState,
     react,
@@ -227,6 +228,43 @@ class Simulator:
         offset = self.rng.randint(-jitter, jitter) if jitter else 0
         self.state.begin_day(self.seed, day=day, energy_offset=offset)
         self._today = []
+
+    def resume_day(
+        self,
+        day: int,
+        *,
+        mood: Mood,
+        memory: Sequence[DayNote] = (),
+        said_today: Sequence[str] = (),
+    ) -> None:
+        """Pick up ``day`` part-way through, from a given state instead of earlier turns.
+
+        EXPERIMENTAL, like the rule probes it was added for: its signature and
+        behaviour may change in a later 0.x release.
+
+        For harnesses that replay a scripted conversation, such as the rule
+        probes (:mod:`moodsona.probe`); call it instead of :meth:`start_day`.
+        The persona's state is replaced: ``mood`` and the ``memory`` notes are
+        set as given, no overnight rule is applied, no reaction rule has fired
+        yet today, and no day is skipped.
+
+        Args:
+            day: The day to resume, from 1.
+            mood: The persona's mood now.
+            memory: The persona's notes of earlier days.
+            said_today: The persona's own messages so far today, in order. They
+                count for the ``own_repeat`` rail and the run-wide ceilings as
+                if the persona had written them. With any, the persona last
+                talked today; without, on the latest day in ``memory``.
+        """
+        last = day if said_today else max((note.day for note in memory), default=0)
+        self.state = PersonaState(
+            mood=mood, current_day=day, last_active_day=last, memory_log=list(memory)
+        )
+        self._today = []
+        self._lines = _Lines()
+        for line in said_today:
+            self._remember_line(line)
 
     def end_day(self, today: Sequence[ChatMessage], *, day: int) -> DayNote | None:
         """Ask the persona for its notes about ``day`` and store them in its memory.

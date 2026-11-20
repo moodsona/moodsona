@@ -186,7 +186,8 @@ more guarded user on day two.
 ## Output
 
 `Transcript.to_jsonl(path)` writes one JSON object per line. The first line
-has `"kind": "run"`: the persona id, the random seed (`rng_seed`), `days` and
+has `"kind": "run"`: the file format version (`"format": 1`), the moodsona
+version that wrote it (`"moodsona"`), the persona id, the random seed (`rng_seed`), `days` and
 `turns_per_day`. Each exchange is then a line with `"kind": "turn"`: day, turn,
 the hidden block (including `rules_triggered` as the model reported it), the
 user's visible message, the companion's reply, the state after the turn, the
@@ -211,7 +212,11 @@ The JSONL is meant to be read by people as well as by scripts. Reading the
 inner thoughts next to the bot's replies is often the fastest way to find the
 problem.
 
-`Transcript.from_jsonl(path)` reads a file back. `moodsona.metrics`
+`Transcript.from_jsonl(path)` reads a file back. It accepts `format` 1, and
+also a file with no `format` field (written by 0.2.0, which is format 1); any
+other `format` raises a `ValueError` naming the file's format and the supported
+one. The number changes only when the layout changes in a way an older reader
+cannot ignore; new line kinds and fields do not change it. `moodsona.metrics`
 (`moodsona report run.jsonl` on the command line) turns a transcript into
 numbers about the simulated user: the emotion and energy trajectory (mean,
 least-squares drift per day, mean absolute change per turn), the share of each
@@ -221,7 +226,53 @@ changes per active day, skipped days, and the polluted and forced shares.
 Polluted turns are left out of everything but their own share, because they
 carry the fallback line and the previous state rather than the model's. These numbers say how well the user model held
 the persona, which is what a comparison of user models needs; they say
-nothing direct about the companion.
+nothing direct about the companion. The exceptions are the outcome numbers:
+mean emotion over the run, the emotion and stance after the last message,
+the change in emotion from the persona's initial state (only when the
+persona is passed, since the transcript does not record the start) and the
+number of days the persona ended before `turns_per_day`.
+
+## Repeats and noise
+
+A run is one sample, not a measurement. The user model samples its words, so
+two runs of the same persona against the same companion differ. `rng_seed`
+does not change that: it seeds only the overnight energy offset and the
+typing noise, and the same seed gives the same model output only with a
+deterministic user model such as `FakeProvider`.
+
+`run_repeats`, `summarize_runs` and `compare_runs` are new in 0.3 and may
+change in a later 0.x release.
+
+So compare companions on several repeats each, and on **mean emotion over the
+run** rather than the emotion at the end. In a 75-run study by the maintainer
+(5 bot variants x 5 personas x 3 repeats) the spread between repeats of one
+setup, as a pooled standard deviation, was 3.7 points for mean emotion and
+9.1 for the end-of-run value, which hangs on the last exchange or two. At
+those spreads, a simulation of `compare_runs` (Welch, two-sided alpha 0.05,
+power 0.8) needs about 4 repeats per companion to detect a true 10-point
+difference in mean emotion, about 10 for a 5-point one, and about 14 for 10
+points with the end value; 3 repeats detect only about 13 points or more.
+Run 5 to 10.
+
+`moodsona.repeats` does this. `run_repeats` runs one persona `repeats` times,
+one run after another, with a new companion and the seed `rng_seed + i` for
+repeat `i`, so the repeats differ in overnight energy and typing noise as
+independent runs would. `summarize_runs` gives for each per-run measure the
+mean, sample standard deviation, min, max and a 95 % interval for the mean
+from Student's t. With one run there is no interval, and when every run has
+the same value the interval shrinks to a point, which is no certainty.
+`compare_runs` gives the difference in means of two sets with a Welch
+interval, which does not assume equal spread; its fractional degrees of
+freedom get the exact t quantile, computed in plain Python. The intervals
+assume independent, roughly normal runs; with a handful of repeats they are
+wide, and an interval that includes 0 says only that the runs cannot tell the
+two companions apart.
+
+Mean emotion is averaged over the persona's messages, not over days. A day
+the persona ends early has fewer messages and so weighs less, and a skipped
+day has none and does not count at all. A companion that drives the persona
+away early can therefore keep a decent mean emotion; read `days_ended_early`
+and `days_skipped` next to it.
 
 ## Prior work
 
@@ -373,7 +424,8 @@ cannot.
   persona longest is a planned v0.2 leaderboard; `moodsona bench` is its
   scaffold. It runs the bundled personas with one user model against a fixed
   scripted companion and tabulates the metrics above per model, without a
-  single score yet.)
+  single score yet.) Even with both fixed, runs vary: compare over repeats
+  (see [Repeats and noise](#repeats-and-noise)).
 - **English only.** v0.1 supports `language: en`. Other languages need their
   own language profile and native-speaker-written personas, planned for v1.0.
 - **No crisis content.** Personas do not portray suicidal ideation, self-harm,

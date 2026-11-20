@@ -70,6 +70,13 @@ repos:
         entry: uv run --frozen python tools/validate_personas.py
         language: system
         files: ^personas/.*\.ya?ml$
+      # Probe files name rules by number, so a persona edit can break them too.
+      - id: probe-checks
+        name: rule probe files match their personas
+        entry: uv run --frozen python tools/validate_probes.py
+        language: system
+        files: ^(personas|probes)/.*\.ya?ml$
+        pass_filenames: false
 
   - repo: https://github.com/zizmorcore/zizmor-pre-commit
     rev: v1.31.1

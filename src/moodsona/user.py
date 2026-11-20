@@ -131,7 +131,8 @@ class SimulatedUser:
 
     Args:
         persona: The persona.
-        model: The model that writes the persona's lines.
+        user_model: The model that writes the persona's lines (the same name
+            :func:`~moodsona.runner.run` uses).
         turns_per_day: Maximum persona messages per simulated day.
         days: Number of simulated days; :attr:`done` turns True after the last
             one. None (the default) sets no limit.
@@ -150,7 +151,7 @@ class SimulatedUser:
     def __init__(
         self,
         persona: PersonaSeed,
-        model: LLMProvider,
+        user_model: LLMProvider,
         *,
         turns_per_day: int = 6,
         days: int | None = None,
@@ -165,7 +166,7 @@ class SimulatedUser:
             raise ValueError("days must be at least 1, or None for no limit")
         self._simulator = Simulator(
             persona,
-            model,
+            user_model,
             language=language,
             safety_hook=safety_hook,
             config=config,
@@ -344,9 +345,13 @@ class SimulatedUser:
 
         Returns:
             The metrics. The agreement, ask-back and wrong-language rates use
-            the simulator's language profile (None when language checks are off).
+            the simulator's language profile (None when language checks are off),
+            and ``emotion_change`` is measured from this persona's initial state.
         """
-        return compute_metrics(self.transcript(history), language=self._simulator.language)
+        simulator = self._simulator
+        return compute_metrics(
+            self.transcript(history), language=simulator.language, persona=simulator.seed
+        )
 
     # -- bookkeeping ----------------------------------------------------------
 

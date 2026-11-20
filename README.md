@@ -176,7 +176,9 @@ energy           40.3      +6.00         3.8
 For a real run, replace `FakeProvider()` with `AnthropicProvider()` or
 `OpenAIProvider()`. The [usage guide](https://github.com/moodsona/moodsona/blob/main/docs/usage.md) covers providers, the
 CLI, every metric in `report`, the `bench` scaffold for comparing user models,
-and the experimental fidelity check.
+and the experimental fidelity check. One run is one sample, and `rng_seed`
+does not make the model's output repeat: to compare bots, use mean emotion
+over 5 to 10 repeats ([`moodsona.repeats`](docs/usage.md#comparing-companions-repeats-and-mean-emotion)).
 
 ## Personas
 
