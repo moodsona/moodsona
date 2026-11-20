@@ -1,6 +1,7 @@
 # Rule probes for personas/examples/skeptical-first-timer.yaml (see docs/personas.md#rule-probes).
 # Fictional situations written for moodsona. Rule numbers follow the persona file:
 # when its rules change, update the numbers here (pre-commit checks they exist).
+version: 1
 persona: skeptical-first-timer
 probes:
   - id: rule-1-defensive

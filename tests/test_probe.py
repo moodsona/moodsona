@@ -219,6 +219,29 @@ def test_file_problems_are_reported(data: dict[str, Any], problem: str) -> None:
     assert any(problem in p for p in info.value.problems), info.value.problems
 
 
+def test_the_file_version_is_optional_and_defaults_to_1() -> None:
+    assert probes_from_mapping(SEED, _data(version=1)) == probes_from_mapping(SEED, VALID)
+
+
+@pytest.mark.parametrize("version", [2, 0, "1", 1.0, True, None, [1]])
+def test_an_unsupported_file_version_is_rejected_alone(version: Any) -> None:
+    # Other problems are not reported: a file of another version may mean other things.
+    data = _data(version=version, extra=1)
+    with pytest.raises(ProbeError) as info:
+        probes_from_mapping(SEED, data, source="mine.yaml")
+    assert info.value.problems == [
+        f"probe file version {version!r} is not supported; this moodsona reads version 1"
+    ]
+    assert str(info.value).startswith("mine.yaml: probe file version")
+
+
+def test_load_probes_names_the_file_with_an_unsupported_version(tmp_path: Path) -> None:
+    path = tmp_path / "test-gardener.yaml"
+    path.write_text(yaml.safe_dump(_data(version=2)), encoding="utf-8")
+    with pytest.raises(ProbeError, match=r"test-gardener\.yaml: probe file version 2"):
+        load_probes(SEED, path)
+
+
 def test_a_non_mapping_is_rejected() -> None:
     with pytest.raises(ProbeError, match="top level must be a mapping"):
         probes_from_mapping(SEED, ["probes"])
@@ -653,6 +676,27 @@ def test_the_offline_check_reports_problems(tmp_path: Path) -> None:
     empty = tmp_path / "empty"
     empty.mkdir()
     assert probe._check_main([str(empty)], out=io.StringIO(), err=err) == 2
+
+
+def test_the_offline_check_reads_the_file_version(tmp_path: Path) -> None:
+    bundled = (bundled_probes_dir() / "skeptical-first-timer.yaml").read_text(encoding="utf-8")
+    assert "\nversion: 1\n" in bundled  # the bundled files state it, as the docs example does
+    good = tmp_path / "skeptical-first-timer.yaml"
+    good.write_text(bundled, encoding="utf-8")
+    err = io.StringIO()
+    assert probe._check_main([str(good)], out=io.StringIO(), err=err) == 0, err.getvalue()
+    newer = tmp_path / "newer" / "nobody.yaml"
+    newer.parent.mkdir()
+    newer.write_text("version: 2\npersona: nobody\nprobes: []\n", encoding="utf-8")
+    assert probe._check_main([str(newer)], out=io.StringIO(), err=err) == 1
+    assert err.getvalue().splitlines() == [
+        f"{newer}: probe file version 2 is not supported; this moodsona reads version 1"
+    ]
+
+
+def test_every_bundled_probe_file_states_its_version() -> None:
+    for path in bundled_probes_dir().glob("*.yaml"):
+        assert yaml.safe_load(path.read_text(encoding="utf-8"))["version"] == 1, path
 
 
 @pytest.mark.parametrize(

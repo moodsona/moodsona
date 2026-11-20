@@ -283,6 +283,7 @@ Probes live in their own file, next to the persona and not inside it:
 the package). Pass any other file with `--probes`.
 
 ```yaml
+version: 1                             # optional: the probe file format, 1 when missing
 persona: grieving-after-loss
 probes:
   - id: rule-1-silver-lining           # kebab-case, unique in the file
@@ -309,6 +310,11 @@ probes:
     reply: That reflex must catch you every time. What did you want to tell her today?
     not_fires: [1, 2, 6]               # no negative rule should fire
 ```
+
+`version` names the probe file format. Only version 1 exists; a file
+without it is read as version 1, and any other value is rejected with an
+error that names the file, so a file written for a later format is never
+half-read. The bundled files state it.
 
 Write one probe per rule, with a `reply` that does what its `when` says and
 nothing else (a long reply that also gives advice tests two rules at once),

@@ -14,6 +14,7 @@ persona schema stays as it is). The bundled ones live in the repository's
 ``probes/`` directory, ``probes/<persona id>.yaml``, and ship in the wheel as
 ``moodsona/probes/``::
 
+    version: 1                         # optional; the probe file format, 1 if missing
     persona: grieving-after-loss
     probes:
       - id: silver-lining              # kebab-case, unique in the file
@@ -98,7 +99,9 @@ DEFAULT_THRESHOLD = Fraction(2, 3)
 _PROBE_SUFFIX = ".yaml"
 
 _ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-_TOP_KEYS = frozenset({"persona", "probes"})
+#: The probe file format this module reads (``version: 1``, or no version at all).
+_FILE_VERSION = 1
+_TOP_KEYS = frozenset({"version", "persona", "probes"})
 _PROBE_KEYS = frozenset(
     {"id", "note", "day", "state", "memory", "context", "reply", "fires", "not_fires"}
 )
@@ -523,6 +526,17 @@ def _context(value: Any, day: int, problems: list[str]) -> tuple[ChatMessage, ..
     return tuple(messages)
 
 
+def _version_problem(data: dict[Any, Any]) -> str | None:
+    """Why the document's ``version`` cannot be read, or None (a missing version means 1)."""
+    version = data.get("version", _FILE_VERSION)
+    if _is_int(version) and version == _FILE_VERSION:
+        return None
+    return (
+        f"probe file version {version!r} is not supported; "
+        f"this moodsona reads version {_FILE_VERSION}"
+    )
+
+
 def _probe(item: Any, persona: PersonaSeed, problems: list[str]) -> Probe | None:
     """Build one probe, adding its problems (without a prefix) to ``problems``."""
     if not isinstance(item, dict):
@@ -583,6 +597,9 @@ def probes_from_mapping(persona: PersonaSeed, data: Any, *, source: str = "probe
     """
     if not isinstance(data, dict):
         raise ProbeError(source, ["top level must be a mapping with persona and probes"])
+    version = _version_problem(data)
+    if version:
+        raise ProbeError(source, [version])
     problems = _unknown(data, _TOP_KEYS)
     if data.get("persona") != persona.id:
         problems.append(
@@ -931,6 +948,9 @@ def _check_file(path: Path) -> list[str]:
         data = _read_yaml(path)
     except ProbeError as exc:
         return [str(exc)]
+    version = _version_problem(data) if isinstance(data, dict) else None
+    if version:
+        return [f"{path}: {version}"]
     persona_id = data.get("persona") if isinstance(data, dict) else None
     if not isinstance(persona_id, str):
         return [f"{path}: needs a persona id (persona: <id>)"]
