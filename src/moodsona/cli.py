@@ -312,12 +312,12 @@ def _bench(args: argparse.Namespace) -> int:
 
 def _probe(args: argparse.Namespace) -> int:
     err, out = sys.stderr, sys.stdout
-    seed = _load_seed(args.persona)
-    if seed is None:
+    persona = _load_seed(args.persona)
+    if persona is None:
         return 1
     try:
-        path = args.probes or probe.bundled_probes_path(seed.id)
-        probes = probe.load_probes(path, seed)
+        path = args.probes or probe.bundled_probes_path(persona.id)
+        probes = probe.load_probes(persona, path)
     except KeyError as exc:
         err.write(f"{exc.args[0]}; write one (see docs/personas.md) and pass --probes FILE\n")
         return 1
@@ -325,7 +325,7 @@ def _probe(args: argparse.Namespace) -> int:
         err.write(f"{exc}\n")
         return 1
     if args.check:
-        out.write("\n".join(probe.format_coverage(probes, seed)) + "\n")
+        out.write("\n".join(probe.format_coverage(persona, probes)) + "\n")
         return 0
     total = len(probes.probes)
     if args.provider != "fake":
@@ -355,7 +355,7 @@ def _probe(args: argparse.Namespace) -> int:
         provider = bench.make_provider(args.provider, args.model)
         label = bench.model_label(args.provider, provider)
         out.write(
-            f"persona {seed.id}: {len(probes.probes)} probe(s) from {probes.source}, "
+            f"persona {persona.id}: {len(probes.probes)} probe(s) from {probes.source}, "
             f"{args.repeats} repeat(s), model {label}\n"
         )
         if args.provider == "fake":
@@ -363,9 +363,9 @@ def _probe(args: argparse.Namespace) -> int:
                 "offline fake model: it never reports a rule, so this checks the plumbing only\n"
             )
         report = probe.run_probes(
-            seed,
+            persona,
             probes,
-            provider,
+            user_model=provider,
             repeats=args.repeats,
             threshold=args.threshold,
             progress=show,

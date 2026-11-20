@@ -7,6 +7,7 @@ texts are synthetic test data written for these tests.
 from __future__ import annotations
 
 import copy
+import inspect
 import io
 import json
 import os
@@ -122,7 +123,7 @@ def _responder(rules_for: Callable[[str], list[int]]) -> Callable[[Sequence[Chat
 
 
 def test_a_valid_file_becomes_probes() -> None:
-    probes = probes_from_mapping(VALID, SEED, source="test")
+    probes = probes_from_mapping(SEED, VALID, source="test")
     assert probes.persona_id == "test-gardener"
     assert [p.id for p in probes.probes] == ["many-questions", "recalls-earlier-day", "neutral"]
     first, second, third = probes.probes
@@ -215,25 +216,25 @@ def test_a_valid_file_becomes_probes() -> None:
 )
 def test_file_problems_are_reported(data: dict[str, Any], problem: str) -> None:
     with pytest.raises(ProbeError) as info:
-        probes_from_mapping(data, SEED, source="test")
+        probes_from_mapping(SEED, data, source="test")
     assert any(problem in p for p in info.value.problems), info.value.problems
 
 
 def test_a_non_mapping_is_rejected() -> None:
     with pytest.raises(ProbeError, match="top level must be a mapping"):
-        probes_from_mapping(["probes"], SEED)
+        probes_from_mapping(SEED, ["probes"])
 
 
 def test_load_probes_reads_yaml_and_rejects_duplicate_keys(tmp_path: Path) -> None:
     good = tmp_path / "test-gardener.yaml"
     good.write_text(yaml.safe_dump(VALID), encoding="utf-8")
-    assert len(load_probes(good, SEED).probes) == 3
+    assert len(load_probes(SEED, good).probes) == 3
     dupe = tmp_path / "dupe.yaml"
     dupe.write_text("persona: test-gardener\npersona: test-gardener\n", encoding="utf-8")
     with pytest.raises(ProbeError, match="duplicate key 'persona'"):
-        load_probes(dupe, SEED)
+        load_probes(SEED, dupe)
     with pytest.raises(ProbeError, match=r"missing\.yaml: file not found"):
-        load_probes(tmp_path / "missing.yaml", SEED)
+        load_probes(SEED, tmp_path / "missing.yaml")
 
 
 @pytest.mark.parametrize(
@@ -247,7 +248,7 @@ def test_a_list_used_as_a_key_is_a_parse_error_not_a_crash(tmp_path: Path, text:
     path = tmp_path / "test-gardener.yaml"
     path.write_text(text, encoding="utf-8")
     with pytest.raises(ProbeError, match="found a list or mapping used as a key"):
-        load_probes(path, SEED)
+        load_probes(SEED, path)
 
 
 def test_persona_validation_reports_a_list_key_instead_of_crashing(tmp_path: Path) -> None:
@@ -259,17 +260,17 @@ def test_persona_validation_reports_a_list_key_instead_of_crashing(tmp_path: Pat
 
 def test_a_day_one_context_may_open_with_the_companion() -> None:
     data = _with_probe(0, context=[{"companion": "Hi there."}, {"persona": "hi"}])
-    assert probes_from_mapping(data, SEED).probes[0].context[0].role == "assistant"
+    assert probes_from_mapping(SEED, data).probes[0].context[0].role == "assistant"
 
 
 # -- one probe, one user-model turn ------------------------------------------------
 
 
 def test_probe_once_sets_up_the_turn_and_reads_the_applied_rules() -> None:
-    probes = probes_from_mapping(VALID, SEED)
+    probes = probes_from_mapping(SEED, VALID)
     second = probes.probes[1]
     provider = FakeProvider([block(rules=[2, 3, 9])])  # 9 is not a rule and is dropped
-    assert probe_once(SEED, second, provider) == frozenset({2, 3})
+    assert probe_once(SEED, second, user_model=provider) == frozenset({2, 3})
     assert len(provider.calls) == 1
     payload = _payload(provider.calls[0].messages)
     assert payload["day"] == 3
@@ -291,10 +292,10 @@ def test_probe_once_sets_up_the_turn_and_reads_the_applied_rules() -> None:
 
 
 def test_the_persona_lines_in_the_context_count_as_said_today() -> None:
-    first = probes_from_mapping(VALID, SEED).probes[0]
+    first = probes_from_mapping(SEED, VALID).probes[0]
     # The first attempt repeats the persona's own context line: the own_repeat rail rejects it.
     provider = FakeProvider([block("planted the beans today"), block("they went in at noon")])
-    assert probe_once(SEED, first, provider) == frozenset()
+    assert probe_once(SEED, first, user_model=provider) == frozenset()
     assert len(provider.calls) == 2
     assert "already said almost exactly this today" in provider.calls[1].messages[-1].content
 
@@ -312,7 +313,7 @@ def test_a_probe_sends_the_prompt_a_real_run_sends_at_the_same_point() -> None:
         id="p", context=tuple(history[:1]), reply=history[1].content, state=mood, fires=(1,)
     )
     probe_model = FakeProvider([block()])
-    probe_once(SEED, scripted, probe_model)
+    probe_once(SEED, scripted, user_model=probe_model)
     assert probe_model.calls[0].messages == model.calls[1].messages
 
 
@@ -345,19 +346,19 @@ def test_a_probe_on_a_later_day_sends_the_prompt_a_real_run_sends() -> None:
         memory=(DayNote(1, ("told it the beans went in",)),),
     )
     probe_model = FakeProvider([block()])
-    probe_once(SEED, scripted, probe_model)
+    probe_once(SEED, scripted, user_model=probe_model)
     assert probe_model.calls[0].messages == model.calls[3].messages
 
 
 def test_probe_once_returns_none_for_a_polluted_turn() -> None:
-    first = probes_from_mapping(VALID, SEED).probes[0]
+    first = probes_from_mapping(SEED, VALID).probes[0]
     provider = FakeProvider(["no state block"] * 3)
-    assert probe_once(SEED, first, provider) is None
+    assert probe_once(SEED, first, user_model=provider) is None
     assert len(provider.calls) == 3
 
 
 def test_run_probes_repeats_each_probe_and_judges_every_rule() -> None:
-    probes = probes_from_mapping(VALID, SEED)
+    probes = probes_from_mapping(SEED, VALID)
     calls = {"n": 0}
 
     def rules_for(reply: str) -> list[int]:
@@ -370,7 +371,11 @@ def test_run_probes_repeats_each_probe_and_judges_every_rule() -> None:
 
     finished: list[ProbeResult] = []
     report = run_probes(
-        SEED, probes, FakeProvider(_responder(rules_for)), repeats=3, progress=finished.append
+        SEED,
+        probes,
+        user_model=FakeProvider(_responder(rules_for)),
+        repeats=3,
+        progress=finished.append,
     )
     assert finished == list(report.results)  # each one as soon as its repeats are done
     lines = [probe.format_result(r) for r in finished]
@@ -404,15 +409,17 @@ def test_progress_counts_polluted_repeats_apart() -> None:
 
 
 def test_run_probes_rejects_bad_settings() -> None:
-    probes = probes_from_mapping(VALID, SEED)
+    probes = probes_from_mapping(SEED, VALID)
     with pytest.raises(ValueError, match="repeats"):
-        run_probes(SEED, probes, FakeProvider(), repeats=0)
+        run_probes(SEED, probes, user_model=FakeProvider(), repeats=0)
     with pytest.raises(ValueError, match="threshold"):
-        run_probes(SEED, probes, FakeProvider(), threshold=0)
+        run_probes(SEED, probes, user_model=FakeProvider(), threshold=0)
     with pytest.raises(ValueError, match="for persona 'test-gardener'"):
-        run_probes(make_seed(id="other-persona"), probes, FakeProvider())
+        run_probes(make_seed(id="other-persona"), probes, user_model=FakeProvider())
     with pytest.raises(ValueError, match=r"recalls-earlier-day: .* window of 3 messages"):
-        run_probes(SEED, probes, FakeProvider(), config=SimulatorConfig(window_messages=3))
+        run_probes(
+            SEED, probes, user_model=FakeProvider(), config=SimulatorConfig(window_messages=3)
+        )
 
 
 def _all_fall_back(messages: Sequence[ChatMessage]) -> str:
@@ -421,8 +428,8 @@ def _all_fall_back(messages: Sequence[ChatMessage]) -> str:
 
 def test_a_run_without_a_single_valid_repeat_fails() -> None:
     neutral_only = {**VALID, "probes": [VALID["probes"][2]]}
-    probes = probes_from_mapping(neutral_only, SEED)
-    report = run_probes(SEED, probes, FakeProvider(_all_fall_back), repeats=2)
+    probes = probes_from_mapping(SEED, neutral_only)
+    report = run_probes(SEED, probes, user_model=FakeProvider(_all_fall_back), repeats=2)
     assert report.empty == ("neutral",)
     assert {r.rule: r.verdict for r in report.rules} == {
         1: Verdict.NO_DATA,
@@ -437,8 +444,8 @@ def test_a_run_without_a_single_valid_repeat_fails() -> None:
 
 def test_a_passing_run_without_positive_probes_does_not_claim_probed_rules() -> None:
     neutral_only = {**VALID, "probes": [VALID["probes"][2]]}
-    probes = probes_from_mapping(neutral_only, SEED)
-    report = run_probes(SEED, probes, FakeProvider(), repeats=1)
+    probes = probes_from_mapping(SEED, neutral_only)
+    report = run_probes(SEED, probes, user_model=FakeProvider(), repeats=1)
     assert report.passed
     summary = "\n".join(probe.format_report(report))
     assert "every probed rule" not in summary
@@ -446,9 +453,26 @@ def test_a_passing_run_without_positive_probes_does_not_claim_probed_rules() -> 
 
 
 def test_run_probes_lets_provider_errors_through() -> None:
-    probes = probes_from_mapping(VALID, SEED)
+    probes = probes_from_mapping(SEED, VALID)
     with pytest.raises(LLMError):
-        run_probes(SEED, probes, FakeProvider([]))
+        run_probes(SEED, probes, user_model=FakeProvider([]))
+
+
+@pytest.mark.parametrize(
+    "function", [load_probes, probes_from_mapping, probe_once, run_probes, judge]
+)
+def test_the_api_takes_the_persona_first_like_run(function: Callable[..., object]) -> None:
+    first = next(iter(inspect.signature(function).parameters.values()))
+    assert first.name == "persona"
+    assert first.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+
+
+@pytest.mark.parametrize("function", [probe_once, run_probes])
+def test_the_user_model_is_passed_by_keyword_like_run(function: Callable[..., object]) -> None:
+    parameters = inspect.signature(function).parameters
+    assert parameters["user_model"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert "provider" not in parameters
+    assert "seed" not in parameters
 
 
 # -- verdicts -----------------------------------------------------------------------
@@ -558,8 +582,8 @@ def test_bundled_probe_files_match_their_personas() -> None:
     ["skeptical-first-timer", "boundary-tester", "grieving-after-loss", "burned-out-shift-worker"],
 )
 def test_the_validation_personas_have_probes_with_a_neutral_reply(persona_id: str) -> None:
-    seed = load_bundled_persona(persona_id)
-    probes = load_probes(bundled_probes_path(persona_id), seed)
+    persona = load_bundled_persona(persona_id)
+    probes = load_probes(persona, bundled_probes_path(persona_id))
     assert any(not p.fires and p.not_fires for p in probes.probes)
 
 
@@ -851,8 +875,8 @@ def test_live_skeptic_probes_run_with_a_real_model() -> None:
     pytest.importorskip("anthropic")
     from moodsona.llm.anthropic import AnthropicProvider
 
-    seed = load_bundled_persona("skeptical-first-timer")
-    probes = load_probes(bundled_probes_path(seed.id), seed)
-    report = run_probes(seed, probes, AnthropicProvider(), repeats=1)
+    persona = load_bundled_persona("skeptical-first-timer")
+    probes = load_probes(persona, bundled_probes_path(persona.id))
+    report = run_probes(persona, probes, user_model=AnthropicProvider(), repeats=1)
     assert len(report.results) == len(probes.probes)
     assert all(r.valid for r in report.results)  # no turn fell back to the neutral line

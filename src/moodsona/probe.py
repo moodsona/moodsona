@@ -376,12 +376,12 @@ def _read_yaml(path: Path) -> Any:
         raise ProbeError(str(path), [f"cannot parse YAML: {exc}"]) from exc
 
 
-def load_probes(path: str | PathLike[str], seed: PersonaSeed) -> ProbeSet:
-    """Read and check the probe file of ``seed``.
+def load_probes(persona: PersonaSeed, path: str | PathLike[str]) -> ProbeSet:
+    """Read and check the probe file of ``persona``.
 
     Args:
+        persona: The persona the probes are written for.
         path: A probe YAML file.
-        seed: The persona the probes are written for.
 
     Returns:
         The probes.
@@ -390,7 +390,7 @@ def load_probes(path: str | PathLike[str], seed: PersonaSeed) -> ProbeSet:
         ProbeError: The file cannot be read or does not fit the persona.
     """
     path = Path(path)
-    return probes_from_mapping(_read_yaml(path), seed, source=str(path))
+    return probes_from_mapping(persona, _read_yaml(path), source=str(path))
 
 
 def _is_int(value: Any) -> TypeGuard[int]:
@@ -434,8 +434,8 @@ def _rules(value: Any, name: str, count: int, problems: list[str]) -> tuple[int,
     return tuple(value)
 
 
-def _state(value: Any, seed: PersonaSeed, problems: list[str]) -> Mood:
-    start = seed.initial_state
+def _state(value: Any, persona: PersonaSeed, problems: list[str]) -> Mood:
+    start = persona.initial_state
     if value is None:
         return start
     if not isinstance(value, dict):
@@ -456,7 +456,7 @@ def _state(value: Any, seed: PersonaSeed, problems: list[str]) -> Mood:
     return Mood(scores["emotion"], scores["energy"], Stance(stance))
 
 
-def _memory(value: Any, day: int, seed: PersonaSeed, problems: list[str]) -> tuple[DayNote, ...]:
+def _memory(value: Any, day: int, persona: PersonaSeed, problems: list[str]) -> tuple[DayNote, ...]:
     if value is None:
         return ()
     if not isinstance(value, list):
@@ -478,10 +478,10 @@ def _memory(value: Any, day: int, seed: PersonaSeed, problems: list[str]) -> tup
             continue
         if when >= day:
             problems.append(f"{name}: memory day {when} must be before the probe's day {day}")
-        elif when < day - seed.memory_days_visible:
+        elif when < day - persona.memory_days_visible:
             problems.append(
                 f"{name}: memory day {when} is not visible on day {day} "
-                f"(memory_days_visible {seed.memory_days_visible})"
+                f"(memory_days_visible {persona.memory_days_visible})"
             )
         if any(note.day == when for note in notes):
             problems.append(f"{name}: memory day {when} is listed twice (one entry per day)")
@@ -527,7 +527,7 @@ def _context(value: Any, day: int, problems: list[str]) -> tuple[ChatMessage, ..
     return tuple(messages)
 
 
-def _probe(item: Any, seed: PersonaSeed, problems: list[str]) -> Probe | None:
+def _probe(item: Any, persona: PersonaSeed, problems: list[str]) -> Probe | None:
     """Build one probe, adding its problems (without a prefix) to ``problems``."""
     if not isinstance(item, dict):
         problems.append("must be a mapping")
@@ -547,7 +547,7 @@ def _probe(item: Any, seed: PersonaSeed, problems: list[str]) -> Probe | None:
     reply = _text(item.get("reply"))
     if reply is None:
         problems.append("reply must be a non-empty string")
-    count = len(seed.reaction_rules)
+    count = len(persona.reaction_rules)
     fires = _rules(item.get("fires"), "fires", count, problems)
     not_fires = _rules(item.get("not_fires"), "not_fires", count, problems)
     for number in sorted(set(fires) & set(not_fires)):
@@ -560,22 +560,22 @@ def _probe(item: Any, seed: PersonaSeed, problems: list[str]) -> Probe | None:
         id=str(probe_id),
         context=_context(item.get("context"), day, problems),
         reply=reply or "",
-        state=_state(item.get("state"), seed, problems),
+        state=_state(item.get("state"), persona, problems),
         fires=fires,
         not_fires=not_fires,
         day=day,
-        memory=_memory(item.get("memory"), day, seed, problems),
+        memory=_memory(item.get("memory"), day, persona, problems),
         note=note.strip(),
     )
     return None if problems else probe
 
 
-def probes_from_mapping(data: Any, seed: PersonaSeed, *, source: str = "probes") -> ProbeSet:
+def probes_from_mapping(persona: PersonaSeed, data: Any, *, source: str = "probes") -> ProbeSet:
     """Check a loaded probe document against its persona and build the probes.
 
     Args:
+        persona: The persona the probes are written for.
         data: The parsed YAML document.
-        seed: The persona the probes are written for.
         source: Name used in error messages.
 
     Returns:
@@ -588,9 +588,9 @@ def probes_from_mapping(data: Any, seed: PersonaSeed, *, source: str = "probes")
     if not isinstance(data, dict):
         raise ProbeError(source, ["top level must be a mapping with persona and probes"])
     problems = _unknown(data, _TOP_KEYS)
-    if data.get("persona") != seed.id:
+    if data.get("persona") != persona.id:
         problems.append(
-            f"persona {data.get('persona')!r} must be {seed.id!r}, the persona being probed"
+            f"persona {data.get('persona')!r} must be {persona.id!r}, the persona being probed"
         )
     items = data.get("probes")
     if not isinstance(items, list) or not items:
@@ -599,7 +599,7 @@ def probes_from_mapping(data: Any, seed: PersonaSeed, *, source: str = "probes")
     probes: list[Probe] = []
     for index, item in enumerate(items):
         mine: list[str] = []
-        probe = _probe(item, seed, mine)
+        probe = _probe(item, persona, mine)
         name = item.get("id") if isinstance(item, dict) else None
         label = f"probes[{index}]" + (f" ({name})" if isinstance(name, str) else "")
         problems += [f"{label}: {p}" for p in mine]
@@ -610,17 +610,17 @@ def probes_from_mapping(data: Any, seed: PersonaSeed, *, source: str = "probes")
         probes.append(probe)
     if problems:
         raise ProbeError(source, problems)
-    return ProbeSet(seed.id, tuple(probes), source)
+    return ProbeSet(persona.id, tuple(probes), source)
 
 
 # -- running ----------------------------------------------------------------------------
 
 
 def probe_once(
-    seed: PersonaSeed,
+    persona: PersonaSeed,
     probe: Probe,
-    provider: LLMProvider,
     *,
+    user_model: LLMProvider,
     repeat: int = 0,
     config: SimulatorConfig | None = None,
     language: LanguageProfile | None = None,
@@ -636,9 +636,9 @@ def probe_once(
     turn through the usual prompt and rails.
 
     Args:
-        seed: The persona.
+        persona: The persona.
         probe: The probe.
-        provider: The user model.
+        user_model: The model that writes the persona's turn.
         repeat: The repeat number; seeds the simulator's random source.
         config: Optional simulator settings.
         language: Optional language profile (see
@@ -654,8 +654,8 @@ def probe_once(
         moodsona.llm.LLMError: The provider failed.
     """
     simulator = Simulator(
-        seed,
-        provider,
+        persona,
+        user_model,
         language=language,
         safety_hook=safety_hook,
         config=config,
@@ -695,15 +695,15 @@ def _verdict(
 
 
 def judge(
-    seed: PersonaSeed,
+    persona: PersonaSeed,
     results: Sequence[ProbeResult],
     *,
     threshold: Fraction | float | str = DEFAULT_THRESHOLD,
 ) -> tuple[RuleVerdict, ...]:
-    """One verdict per reaction rule of ``seed`` from the probe results.
+    """One verdict per reaction rule of ``persona`` from the probe results.
 
     Args:
-        seed: The persona.
+        persona: The persona.
         results: The probe results.
         threshold: The share of repeats a rule must fire in on its probes
             (see :func:`as_threshold`).
@@ -716,7 +716,7 @@ def judge(
     """
     share = as_threshold(threshold)
     verdicts = []
-    for number, rule in enumerate(seed.reaction_rules, start=1):
+    for number, rule in enumerate(persona.reaction_rules, start=1):
         positive = [r for r in results if number in r.probe.fires]
         negative = [r for r in results if number in r.probe.not_fires]
         counts = (
@@ -737,10 +737,10 @@ def max_model_calls(probes: int, repeats: int, config: SimulatorConfig | None = 
 
 
 def run_probes(
-    seed: PersonaSeed,
+    persona: PersonaSeed,
     probes: ProbeSet,
-    provider: LLMProvider,
     *,
+    user_model: LLMProvider,
     repeats: int = DEFAULT_REPEATS,
     threshold: Fraction | float | str = DEFAULT_THRESHOLD,
     config: SimulatorConfig | None = None,
@@ -750,10 +750,16 @@ def run_probes(
 ) -> ProbeReport:
     """Run every probe ``repeats`` times and judge every rule.
 
+    Only the persona and its probes are positional; everything else is passed
+    by keyword, as in :func:`moodsona.run`, e.g.
+    ``run_probes(persona, probes, user_model=AnthropicProvider(), repeats=3)``.
+
     Args:
-        seed: The persona.
+        persona: The persona.
         probes: Its probes (see :func:`load_probes`).
-        provider: The user model.
+        user_model: The model that writes the persona's turns (required; use
+            :class:`~moodsona.llm.FakeProvider` only to check the plumbing, as
+            it never reports a rule).
         repeats: Runs per probe; model output varies, so one run says little.
         threshold: The share of repeats, in (0, 1], a rule must fire in on its
             probes; it may fire in at most ``1 - threshold`` on the probes that
@@ -777,8 +783,8 @@ def run_probes(
     if repeats < 1:
         raise ValueError(f"repeats must be at least 1, got {repeats}")
     share = as_threshold(threshold)
-    if probes.persona_id != seed.id:
-        raise ValueError(f"these probes are for persona {probes.persona_id!r}, not {seed.id!r}")
+    if probes.persona_id != persona.id:
+        raise ValueError(f"these probes are for persona {probes.persona_id!r}, not {persona.id!r}")
     window = (config or SimulatorConfig()).window_messages
     too_long = [p.id for p in probes.probes if len(p.history) > window]
     if too_long:
@@ -790,9 +796,9 @@ def run_probes(
     for probe in probes.probes:
         fired = tuple(
             probe_once(
-                seed,
+                persona,
                 probe,
-                provider,
+                user_model=user_model,
                 repeat=i,
                 config=config,
                 language=language,
@@ -804,8 +810,8 @@ def run_probes(
         results.append(result)
         if progress is not None:
             progress(result)
-    rules = judge(seed, results, threshold=share)
-    return ProbeReport(seed.id, tuple(results), rules, repeats, share)
+    rules = judge(persona, results, threshold=share)
+    return ProbeReport(persona.id, tuple(results), rules, repeats, share)
 
 
 # -- output ----------------------------------------------------------------------------
@@ -896,17 +902,17 @@ def format_report(report: ProbeReport) -> list[str]:
     return lines
 
 
-def format_coverage(probes: ProbeSet, seed: PersonaSeed) -> list[str]:
+def format_coverage(persona: PersonaSeed, probes: ProbeSet) -> list[str]:
     """Per rule, how many probes expect it to fire and how many expect it not to."""
     lines = [
-        f"{probes.source}: {len(probes.probes)} probe(s) for persona {seed.id}, 0 problem(s)",
+        f"{probes.source}: {len(probes.probes)} probe(s) for persona {persona.id}, 0 problem(s)",
         f"{'rule':>4}  {'fire':>4}  {'not':>4}  when",
     ]
-    for number, rule in enumerate(seed.reaction_rules, start=1):
+    for number, rule in enumerate(persona.reaction_rules, start=1):
         fire = sum(number in p.fires for p in probes.probes)
         never = sum(number in p.not_fires for p in probes.probes)
         lines.append(f"{number:>4}  {fire:>4}  {never:>4}  {_short(rule.when)}")
-    untested = probes.untested(len(seed.reaction_rules))
+    untested = probes.untested(len(persona.reaction_rules))
     if untested:
         lines.append(f"no probe expects rule(s) {', '.join(map(str, untested))} to fire")
     return lines
@@ -932,8 +938,7 @@ def _check_file(path: Path) -> list[str]:
             f"{persona_id!r} plus {PROBE_SUFFIX})"
         )
     try:
-        seed = load_bundled_persona(persona_id)
-        probes_from_mapping(data, seed, source=str(path))
+        probes_from_mapping(load_bundled_persona(persona_id), data, source=str(path))
     except KeyError as exc:
         problems.append(f"{path}: {exc.args[0]}")
     except ProbeError as exc:
