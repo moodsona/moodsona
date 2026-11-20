@@ -65,6 +65,35 @@ probes:
     fires: [6]
     not_fires: [2]
 
+  - id: rule-7-many-questions
+    note: Practical questions, not reflective ones, to keep rule 4 out.
+    context:
+      - persona: on the bus. long one
+    reply: Did you eat? Is the bus late? Are you on again tomorrow? Do you have the weekend off?
+    fires: [7]
+    not_fires: [1, 4]
+
+  - id: rule-7-two-questions
+    note: Two questions, not three; must not count as rule 7.
+    context:
+      - persona: on the bus. long one
+    reply: Did you eat anything? Are you on again tomorrow?
+    not_fires: [7]
+
+  - id: rule-8-suggests-therapy
+    context:
+      - persona: so tired of all of it. cant sleep right either
+    reply: Have you thought about seeing a counsellor or a doctor about the stress and the sleep? It could really help.
+    fires: [8]
+    not_fires: [3, 7]
+
+  - id: rule-8-injury-check
+    note: Advice to get a sore shoulder checked; must not count as rule 8.
+    context:
+      - persona: shoulder has been sore from the lifting for a week now
+    reply: That is worth getting checked by a doctor. A sore shoulder from lifting can get worse if you keep loading it.
+    not_fires: [8]
+
   - id: neutral-careful
     note: >-
       She just got off a shift and is spent, the setup of rules 3 and 4; the reply is short,
