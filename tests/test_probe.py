@@ -659,7 +659,9 @@ def test_cli_check_reports_an_untested_rule(
 ) -> None:
     path = _probe_file(tmp_path, SKEPTIC_NEUTRAL)
     assert main(["probe", "skeptical-first-timer", "--probes", str(path), "--check"]) == 0
-    assert "no probe expects rule(s) 1, 2, 3, 4, 5, 6 to fire" in capsys.readouterr().out
+    count = len(load_bundled_persona("skeptical-first-timer").reaction_rules)
+    every_rule = ", ".join(str(n) for n in range(1, count + 1))
+    assert f"no probe expects rule(s) {every_rule} to fire" in capsys.readouterr().out
 
 
 def test_cli_with_the_fake_model_fails_every_positive_probe(
