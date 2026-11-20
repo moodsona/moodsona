@@ -11,8 +11,8 @@ abstract: >-
   over the transcripts.
 authors:
   - given-names: Alex
-version: 0.2.0 # x-release-please-version
-date-released: 2026-10-25 # x-release-please-date
+version: 0.3.0 # x-release-please-version
+date-released: 2026-11-20 # x-release-please-date
 repository-code: https://github.com/moodsona/moodsona
 license: Apache-2.0
 keywords:
