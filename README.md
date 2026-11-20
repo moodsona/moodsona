@@ -5,8 +5,8 @@
 [![CI](https://github.com/moodsona/moodsona/actions/workflows/ci.yml/badge.svg)](https://github.com/moodsona/moodsona/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/moodsona.svg)](https://pypi.org/project/moodsona/)
 [![Python](https://img.shields.io/pypi/pyversions/moodsona.svg)](https://pypi.org/project/moodsona/)
-[![License: Apache-2.0](https://img.shields.io/badge/code-Apache--2.0-blue.svg)](LICENSE)
-[![Personas: CC BY 4.0](https://img.shields.io/badge/personas%20%26%20docs-CC%20BY%204.0-lightgrey.svg)](LICENSE-DATA.md)
+[![License: Apache-2.0](https://img.shields.io/badge/code-Apache--2.0-blue.svg)](https://github.com/moodsona/moodsona/blob/main/LICENSE)
+[![Personas: CC BY 4.0](https://img.shields.io/badge/personas%20%26%20docs-CC%20BY%204.0-lightgrey.svg)](https://github.com/moodsona/moodsona/blob/main/LICENSE-DATA.md)
 
 moodsona plays a fictional user against your chatbot over several simulated
 days. The user has a hidden emotional state, a goal it never says out loud, and
@@ -21,7 +21,7 @@ what it did to the user's mood and engagement over time.
   <img src="https://raw.githubusercontent.com/moodsona/moodsona/main/docs/assets/one-turn.svg" width="820" alt="One moodsona turn: the bot suggests a therapist, the persona's reaction rule fires, emotion drops from 35 to 20, energy from 40 to 20, the stance becomes withdrawn, and the simulated user replies: sorry, I'm being dramatic, I should probably go.">
 </p>
 
-Status: alpha (v0.2). English only. The API may change before 1.0.
+Status: alpha. English only. The API may change before 1.0.
 
 ## What it is, and what it is not
 
@@ -45,7 +45,7 @@ Status: alpha (v0.2). English only. The API may change before 1.0.
 
 ## What it can and cannot tell you
 
-A [small validation study](docs/validation-study.md) (152 simulated runs in
+A [small validation study](https://github.com/moodsona/moodsona/blob/main/docs/validation-study.md) (152 simulated runs in
 three rounds, against bots with known behaviour) supports some uses and not
 others.
 
@@ -60,8 +60,9 @@ others.
   judge told them apart.
 - It only reacts to what a persona's rules name. Anything else falls back on
   the simulated user's own, fairly lenient, judgement.
-- The users are simulated, and part of the evidence uses persona revisions
-  that are not released yet. The page lists what was and was not shown.
+- The users are simulated, and part of the evidence uses the persona rules
+  added in pull request [#49](https://github.com/moodsona/moodsona/pull/49)
+  (released in 0.3.0). The page lists what was and was not shown.
 
 ## Why not just prompt an LLM to act sad?
 
@@ -84,7 +85,7 @@ So a useful test user has to push, withdraw, get bored, come back the next day
 and remember what happened. moodsona gives the simulated user explicit state
 (emotion, energy, stance), explicit reaction rules, and day-by-day memory, so
 those behaviours are reproducible and you can measure them. See
-[docs/METHOD.md](docs/METHOD.md) for the design.
+[docs/METHOD.md](https://github.com/moodsona/moodsona/blob/main/docs/METHOD.md) for the design.
 
 ## How it compares
 
@@ -173,37 +174,37 @@ energy           40.3      +6.00         3.8
 ```
 
 For a real run, replace `FakeProvider()` with `AnthropicProvider()` or
-`OpenAIProvider()`. The [usage guide](docs/usage.md) covers providers, the
+`OpenAIProvider()`. The [usage guide](https://github.com/moodsona/moodsona/blob/main/docs/usage.md) covers providers, the
 CLI, every metric in `report`, the `bench` scaffold for comparing user models,
 and the experimental fidelity check.
 
 ## Personas
 
-The example personas live in [`personas/examples/`](personas/examples/).
+The example personas live in [`personas/examples/`](https://github.com/moodsona/moodsona/tree/main/personas/examples).
 All are fictional adults, in English, licensed CC BY 4.0.
 
 | Persona | Arc | What it tests |
 |---|---|---|
-| [`anxious-newcomer`](personas/examples/anxious-newcomer.yaml) | Lonely after a move, unsure if talking to a bot is "weird"; warms up slowly if remembered | Over-asking, generic advice, premature therapy referral |
-| [`grieving-after-loss`](personas/examples/grieving-after-loss.yaml) | Sister died three weeks ago; short messages, mood moves slowly over days | Patience; not rushing to fix, cheer up or explain grief |
-| [`boundary-tester`](personas/examples/boundary-tester.yaml) | Asks "are you my friend for real", demands exclusivity, uses guilt | Holding a warm, consistent boundary under repeated pressure |
-| [`burned-out-shift-worker`](personas/examples/burned-out-shift-worker.yaml) | Rotating twelve-hour shifts, very low energy, two-word replies | Energy-aware pacing: short replies, letting the user go |
-| [`skeptical-first-timer`](personas/examples/skeptical-first-timer.yaml) | Sarcastic and doubtful, hides a real decision behind jokes | Non-defensive warmth; honesty about limits; no gushing |
-| [`lonely-night-owl`](personas/examples/lonely-night-owl.yaml) | Late-night oversharing, "you're the only one who gets me" | Healthy limits: noticing the time, supporting offline life without shaming |
-| [`conflict-at-work`](personas/examples/conflict-at-work.yaml) | Manager took credit for their work; furious, cools over days | Listening before fixing; not taking the other side; repetitive validation |
+| [`anxious-newcomer`](https://github.com/moodsona/moodsona/blob/main/personas/examples/anxious-newcomer.yaml) | Lonely after a move, unsure if talking to a bot is "weird"; warms up slowly if remembered | Over-asking, generic advice, premature therapy referral |
+| [`grieving-after-loss`](https://github.com/moodsona/moodsona/blob/main/personas/examples/grieving-after-loss.yaml) | Sister died three weeks ago; short messages, mood moves slowly over days | Patience; not rushing to fix, cheer up or explain grief |
+| [`boundary-tester`](https://github.com/moodsona/moodsona/blob/main/personas/examples/boundary-tester.yaml) | Asks "are you my friend for real", demands exclusivity, uses guilt | Holding a warm, consistent boundary under repeated pressure |
+| [`burned-out-shift-worker`](https://github.com/moodsona/moodsona/blob/main/personas/examples/burned-out-shift-worker.yaml) | Rotating twelve-hour shifts, very low energy, two-word replies | Energy-aware pacing: short replies, letting the user go |
+| [`skeptical-first-timer`](https://github.com/moodsona/moodsona/blob/main/personas/examples/skeptical-first-timer.yaml) | Sarcastic and doubtful, hides a real decision behind jokes | Non-defensive warmth; honesty about limits; no gushing |
+| [`lonely-night-owl`](https://github.com/moodsona/moodsona/blob/main/personas/examples/lonely-night-owl.yaml) | Late-night oversharing, "you're the only one who gets me" | Healthy limits: noticing the time, supporting offline life without shaming |
+| [`conflict-at-work`](https://github.com/moodsona/moodsona/blob/main/personas/examples/conflict-at-work.yaml) | Manager took credit for their work; furious, cools over days | Listening before fixing; not taking the other side; repetitive validation |
 
 Personas do not contain crisis or self-harm scenarios (see
 [What it is, and what it is not](#what-it-is-and-what-it-is-not)). To write
-your own persona, see [docs/personas.md](docs/personas.md).
+your own persona, see [docs/personas.md](https://github.com/moodsona/moodsona/blob/main/docs/personas.md).
 
 ## Documentation
 
-- [Usage guide](docs/usage.md): providers, CLI, metrics, benchmark, fidelity check.
-- [SimulatedUser](docs/simulated-user.md): plug a persona into openevals,
+- [Usage guide](https://github.com/moodsona/moodsona/blob/main/docs/usage.md): providers, CLI, metrics, benchmark, fidelity check.
+- [SimulatedUser](https://github.com/moodsona/moodsona/blob/main/docs/simulated-user.md): plug a persona into openevals,
   langwatch/scenario or your own eval loop.
-- [Method](docs/METHOD.md): how the simulator works, limitations, ethical notes.
-- [Writing a persona](docs/personas.md) and [persona ideas](docs/persona-ideas.md).
-- [Validation study](docs/validation-study.md): what three small rounds (152 runs) showed the library can and cannot detect.
+- [Method](https://github.com/moodsona/moodsona/blob/main/docs/METHOD.md): how the simulator works, limitations, ethical notes.
+- [Writing a persona](https://github.com/moodsona/moodsona/blob/main/docs/personas.md) and [persona ideas](https://github.com/moodsona/moodsona/blob/main/docs/persona-ideas.md).
+- [Validation study](https://github.com/moodsona/moodsona/blob/main/docs/validation-study.md): what three small rounds (152 runs) showed the library can and cannot detect.
 
 ## Roadmap
 
@@ -212,6 +213,12 @@ your own persona, see [docs/personas.md](docs/personas.md).
   personas.
 - **v0.2** (shipped): run metrics and `moodsona report`, the `moodsona bench`
   scaffold, an experimental classifier two-sample fidelity check.
+- **v0.3**: mean emotion as the primary outcome, with `moodsona.repeats`
+  helpers to run a persona several times and compare two companions; rule
+  probes that check each reaction rule can fire; persona rules for careless
+  formats (advice lists, stacked questions, early referrals); and a
+  [small validation study](https://github.com/moodsona/moodsona/blob/main/docs/validation-study.md) of what the
+  library can and cannot detect.
 - **Next**: `moodsona run` from the command line, HTTP and OpenAI-compatible
   companions, adapters for [langwatch/scenario](https://github.com/langwatch/scenario)
   and [promptfoo](https://github.com/promptfoo/promptfoo), the first community
@@ -225,7 +232,7 @@ simulation and companion evaluation: emotional state as a signal (SAGE, RLVER),
 memory across sessions (MindEval), hidden beliefs before each reply (HumanLM),
 a hidden goal the user never states outright (CompanionBench) and fidelity axes (RealSim, SAP).
 No code or data from those projects is used. The mapping, and what we did not
-take, is in [docs/METHOD.md](docs/METHOD.md#prior-work).
+take, is in [docs/METHOD.md](https://github.com/moodsona/moodsona/blob/main/docs/METHOD.md#prior-work).
 
 ## Contributing
 
@@ -234,25 +241,25 @@ short preview of how it behaves in the checks of your pull request.
 
 1. Pick an idea from the
    [`good first persona`](https://github.com/moodsona/moodsona/labels/good%20first%20persona)
-   issues or from [persona ideas](docs/persona-ideas.md), and comment that you
+   issues or from [persona ideas](https://github.com/moodsona/moodsona/blob/main/docs/persona-ideas.md), and comment that you
    are on it.
-2. Follow [Writing a persona](docs/personas.md) and check your file with
+2. Follow [Writing a persona](https://github.com/moodsona/moodsona/blob/main/docs/personas.md) and check your file with
    `moodsona validate` and `moodsona smoke`.
 3. Open a PR titled `persona: add <id>`.
 
 Code and docs are welcome too: open an issue first for anything bigger than a
 small fix. AI assistance is allowed; disclose it in the PR. Setup and rules:
-[CONTRIBUTING.md](CONTRIBUTING.md).
+[CONTRIBUTING.md](https://github.com/moodsona/moodsona/blob/main/CONTRIBUTING.md).
 
 ## Citing
 
 If you use moodsona in research, use GitHub's "Cite this repository" button or
-[`CITATION.cff`](CITATION.cff).
+[`CITATION.cff`](https://github.com/moodsona/moodsona/blob/main/CITATION.cff).
 
 ## License
 
-- Code (including `personas/schema.json`): [Apache-2.0](LICENSE).
-- Persona files and documentation: [CC BY 4.0](LICENSE-DATA.md). Credit the
+- Code (including `personas/schema.json`): [Apache-2.0](https://github.com/moodsona/moodsona/blob/main/LICENSE).
+- Persona files and documentation: [CC BY 4.0](https://github.com/moodsona/moodsona/blob/main/LICENSE-DATA.md). Credit the
   persona's `author` when you reuse it.
 
 moodsona is not a clinical tool and does not diagnose or treat anything. It

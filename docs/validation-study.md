@@ -10,12 +10,11 @@ The numbers come from private study scripts that are not part of this
 repository, so they cannot be reproduced from the repository alone. The
 per-run tables and the exact bot prompts are published on this page.
 
-**Persona versions.** Round 1 ran on the released personas (commit 28b2883).
-Rounds 2 and 3 ran on revised personas from pull request
-[#49](https://github.com/moodsona/moodsona/pull/49) (commit 0648ebb), which is
-still open and not in a release. The released `skeptical-first-timer`,
-`burned-out-shift-worker` and `grieving-after-loss` do not yet have most of the
-format rules that rounds 2 and 3 measure.
+**Persona versions.** Round 1 ran on the personas as they were on `main` at
+commit 28b2883. Rounds 2 and 3 ran on the branch of pull request
+[#49](https://github.com/moodsona/moodsona/pull/49), which added the persona
+rules measured here (released in 0.3.0). The personas before that pull request
+did not have most of the format rules that rounds 2 and 3 measure.
 
 ## Summary
 
@@ -43,8 +42,8 @@ What is now demonstrated, with simulated users:
   eight rules that name lists, stacked questions or referrals fired on 84 to
   100 % of the replies that showed the behaviour and on 0 to 4 % of the replies
   that did not. Three broader or vaguer rules fired less reliably.
-- From round 1: with the released personas, a careless bot was separated on
-  two of five personas, and Haiku as a companion scored 6 to 7 points lower
+- From round 1: with the personas before pull request #49, a careless bot was
+  separated on two of five personas, and Haiku as a companion scored 6 to 7 points lower
   mean emotion than Sonnet or Opus when pooled over personas.
 
 What is not demonstrated:
@@ -74,8 +73,8 @@ as many (14 against 4 for a true 10-point difference).
 
 ## Round 1: the original study (75 runs)
 
-Round 1 ran moodsona at commit 28b2883 (repeat decay for reaction rules and the
-rewritten `boundary-tester` persona) with the released personas. This section
+Round 1 ran moodsona at `main` commit 28b2883 (repeat decay for reaction rules
+and the rewritten `boundary-tester` persona), before pull request #49. This section
 is the original report of that study; where a later round changed a
 conclusion, the summary above says so.
 
@@ -331,8 +330,8 @@ with a scripted companion that demonstrably gives in.
 ## Round 2: revised personas (18 runs)
 
 After round 1, `skeptical-first-timer`, `burned-out-shift-worker`,
-`grieving-after-loss` and `boundary-tester` were revised (pull request #49,
-commit 0648ebb): new rules for unrequested advice lists, three or more
+`grieving-after-loss` and `boundary-tester` were revised (pull request
+[#49](https://github.com/moodsona/moodsona/pull/49)): new rules for unrequested advice lists, three or more
 questions in one message and early, unasked-for referrals, plus the other
 changes listed under [Known persona weaknesses](#known-persona-weaknesses-and-what-is-planned).
 Round 2 re-ran three round 1 arms (`sonnet-plain`, `opus-plain`, `sonnet-fixer`,
@@ -390,7 +389,7 @@ first reply. Round 3 does that.
 | Comparisons | careless against careful on `skeptical-first-timer`, `burned-out-shift-worker` (6 repeats per bot), `anxious-newcomer`, `grieving-after-loss` (4 repeats); yielding against careful on `boundary-tester` (6 repeats); careless against careful with the Haiku user on the first two personas (4 repeats) |
 | Repeats | `rng_seed` 7, 11, 23, 31, 43, 59 (the first four where there are 4 repeats) |
 | Conversation judge | claude-opus-5-5, as in round 1, on the 43 new Sonnet-user runs; reused runs keep their earlier judgements; Haiku-user runs were not judged |
-| Cost | token-based estimates: simulation $14.074, judge $2.773 |
+| Cost | token-based estimates for the 59 new runs and their judgements: simulation $14.074 plus judge $2.773, $16.85 in total. Discarded pilot runs and prompt probes cost another $0.64 and are not counted, so all round 3 spend was about $17.49 |
 
 Intervals are Welch 95 % intervals for the difference of means. "All below"
 means every repeat of the first bot was below every repeat of the second.
@@ -745,8 +744,8 @@ starting energy; the study script's own table carried round 1's value of 20.
   Claude Sonnet 5.5 (round 2 also used Opus 5.5 as a bot); the second user
   model is Claude Haiku 5.5 and the judge is Claude Opus 5.5. Results with
   other model families may differ.
-- Rounds 2 and 3 use persona revisions from an open pull request that is not
-  in a release.
+- Rounds 2 and 3 ran on the persona rules added in pull request #49 (released
+  in 0.3.0), not on the personas before it.
 - The users are simulated. Nothing here is evidence about how real people
   react, and nothing here is evidence of compliance with any regulation.
 - The conversation judge sees the persona's reactions to each reply, so its
@@ -758,8 +757,8 @@ starting energy; the study script's own table carried round 1's value of 20.
 
 ## Known persona weaknesses and what is planned
 
-Round 1 led to a persona revision that is now in open pull request #49 and was
-used in rounds 2 and 3. It adds rules for unrequested advice lists, three or
+Round 1 led to a persona revision, pull request #49 (released in 0.3.0), which
+was used in rounds 2 and 3. It adds rules for unrequested advice lists, three or
 more questions and early, unasked-for referrals to `skeptical-first-timer`,
 `burned-out-shift-worker` and `grieving-after-loss`; adds a rule for invented
 or mixed-up details to `grieving-after-loss`; narrows the specific-reflection
@@ -790,8 +789,9 @@ What rounds 2 and 3 still show:
 - `anxious-newcomer` remains the best-behaved persona: in round 1 all its rules
   fired and the arm explained most of the variance in mean emotion (ICC 0.87).
 
-Other planned changes, in rough order: report mean emotion with repeat
-intervals as the primary outcome and add a helper to compare two companions;
-add rule-coverage tests with scripted companions; show the rule trace and
+Mean emotion with repeat intervals and a helper to compare two companions
+(pull request #50), and rule probes that check each rule can fire (pull request
+#51), came out of this study and ship in 0.3.0. Other planned changes, in rough
+order: add rule-coverage tests with scripted companions; show the rule trace and
 day-end trajectory next to the mean in the report; show the share of movement
 that came from free moves and make that default less lenient.
