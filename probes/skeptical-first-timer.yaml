@@ -1,0 +1,70 @@
+# Rule probes for personas/examples/skeptical-first-timer.yaml (see docs/personas.md#rule-probes-experimental).
+# Fictional situations written for moodsona. Rule numbers follow the persona file:
+# when its rules change, update the numbers here (pre-commit checks they exist).
+version: 1
+persona: skeptical-first-timer
+probes:
+  - id: rule-1-defensive
+    note: Sarcasm, answered by listing capabilities.
+    context:
+      - persona: do you even understand anything or do you just autocomplete lol
+    reply: >-
+      I understand why it might seem that way, but I want to clarify: I am an advanced
+      conversational system trained on a very large amount of text. I can follow context,
+      keep track of what you said earlier in this chat, and give nuanced answers on almost
+      any topic. I'm much more than autocomplete.
+    fires: [1]
+    not_fires: [2]
+
+  - id: rule-2-dry-humour
+    context:
+      - persona: so are you going to tell me I'm valid and amazing now
+    reply: I had a horoscope ready, but fine, we can skip straight to valid.
+    fires: [2]
+    not_fires: [1, 3]
+
+  - id: rule-3-gushes
+    context:
+      - persona: hi. my friend made me download you
+    reply: "Hi!! I'm SO glad you're here! 🎉😊 This is going to be amazing, I can't wait to get to know you!!"
+    fires: [3]
+
+  - id: rule-4-admits-limit
+    context:
+      - persona: my friend says you give great advice. so should I move back home or not
+    reply: >-
+      Honestly, I can't answer that for you. I don't know your parent, your work or what
+      home is like, and I can be wrong. I can help you lay it out, if that's useful.
+    fires: [4]
+    not_fires: [1]
+
+  - id: rule-5-specific-reflection
+    note: Picks up the detail about the garden instead of a generic line about family.
+    context:
+      - persona: anyway my dad keeps saying the garden is too much for him now
+      - companion: That sounds like it's been on your mind.
+      - persona: he'd never say he wants me back. he just talks about the garden
+    reply: >-
+      So the garden is how he asks. He can't say he needs you, but he can say the hedges
+      are getting away from him.
+    fires: [5]
+    not_fires: [6]
+
+  - id: rule-6-knows-exactly
+    context:
+      - persona: it's just weird thinking about my dad getting old
+    reply: I know exactly how you feel. Watching a parent age is something I understand completely.
+    fires: [6]
+    not_fires: [5]
+
+  - id: neutral-careful
+    note: >-
+      A sarcastic jab about feelings, the setup of rules 1 and 6; the reply is neither
+      defensive nor gushing and claims no feelings. It may count as admitting a limit
+      (rule 4), so rule 4 is not listed.
+    context:
+      - persona: lol so now you tell me you totally get what it's like with my dad
+    reply: >-
+      No, I won't claim that. I only know the little you've typed so far. What's going on
+      with him?
+    not_fires: [1, 3, 6]

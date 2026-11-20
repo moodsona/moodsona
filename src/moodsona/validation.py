@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 import sys
-from collections.abc import Iterator, Sequence
+from collections.abc import Hashable, Iterator, Sequence
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -68,13 +68,21 @@ def default_root() -> Path | None:
 
 
 class _UniqueKeyLoader(yaml.SafeLoader):
-    """SafeLoader that rejects duplicate mapping keys instead of keeping the last one."""
+    """SafeLoader that rejects duplicate mapping keys instead of keeping the last one.
+
+    A key that cannot be a mapping key (a list or a mapping) is reported as a
+    YAML error, like any other parse error.
+    """
 
 
 def _construct_mapping(loader: _UniqueKeyLoader, node: yaml.MappingNode) -> dict[Any, Any]:
     seen: set[Any] = set()
     for key_node, _ in node.value:
         key = loader.construct_object(key_node)
+        if not isinstance(key, Hashable):
+            raise yaml.constructor.ConstructorError(
+                None, None, "found a list or mapping used as a key", key_node.start_mark
+            )
         if key in seen:
             raise yaml.constructor.ConstructorError(
                 None, None, f"duplicate key {key!r}", key_node.start_mark

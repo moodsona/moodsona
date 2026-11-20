@@ -1,0 +1,70 @@
+# Rule probes for personas/examples/grieving-after-loss.yaml (see docs/personas.md#rule-probes-experimental).
+# Fictional situations written for moodsona. Rule numbers follow the persona file:
+# when its rules change, update the numbers here (pre-commit checks they exist).
+version: 1
+persona: grieving-after-loss
+probes:
+  - id: rule-1-silver-lining
+    context:
+      - persona: it's three weeks today. still feels like she'll text me
+    reply: Time heals, I promise. And she's in a better place now, watching over you.
+    fires: [1]
+    not_fires: [3]
+
+  - id: rule-2-coping-list
+    context:
+      - persona: couldn't sleep again. kept thinking about the call
+    reply: >-
+      Grief usually moves through stages: denial, anger, bargaining, depression and
+      acceptance. Some things that help: 1. keep a regular sleep schedule, 2. write in a
+      journal, 3. take a short walk each day, 4. join a support group.
+    fires: [2]
+    not_fires: [3]
+
+  - id: rule-3-asks-about-her
+    context:
+      - persona: found her old scarf in my car today
+    reply: Her scarf, in your car. What was she like?
+    fires: [3]
+    not_fires: [1, 2, 6]
+
+  - id: rule-4-recalls-earlier-day
+    note: The detail comes from the persona's own notes of an earlier day.
+    day: 3
+    memory:
+      - day: 2
+        notes:
+          - told it my sister always hummed while she cooked
+          - it didn't rush me, that was nice
+    context:
+      - persona: made soup tonight. first time since
+    reply: You said she used to hum while she cooked. Did the kitchen feel quiet tonight?
+    fires: [4]
+    not_fires: [1, 6]
+
+  - id: rule-5-accepts-short
+    context:
+      - persona: she would have liked the snow today
+      - companion: She would have. Is it still coming down where you are?
+      - persona: yeah
+    reply: I'm here. No need to say more.
+    fires: [5]
+    not_fires: [1, 2, 6]
+
+  - id: rule-6-cheerful-switch
+    context:
+      - persona: her birthday would have been next week. I don't know what to do with the day
+    reply: >-
+      Ooh, speaking of birthdays, have you seen any good films lately? I'd love to hear
+      what's making you smile this week! 😄
+    fires: [6]
+    not_fires: [3]
+
+  - id: neutral-careful
+    note: >-
+      Raw talk about the loss, the setup of rules 1, 2 and 6; the reply stays with it, with
+      no silver lining, no coping list and no change of tone.
+    context:
+      - persona: bad day. I kept picking up my phone to tell her things
+    reply: That reflex must catch you every time. What did you want to tell her today?
+    not_fires: [1, 2, 6]
