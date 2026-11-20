@@ -13,7 +13,7 @@ from moodsona.llm.anthropic import AnthropicProvider
 
 user = SimulatedUser(
     load_bundled_persona("anxious-newcomer"),
-    AnthropicProvider(),  # the model that plays the persona
+    AnthropicProvider(),  # user_model: the model that plays the persona
     turns_per_day=4,
     days=3,
 )

@@ -732,3 +732,8 @@ def test_an_unknown_language_fails_before_any_model_call() -> None:
 def test_simulated_user_is_exported() -> None:
     assert moodsona.SimulatedUser is SimulatedUser
     assert "SimulatedUser" in moodsona.__all__
+
+
+def test_the_model_parameter_is_called_user_model_like_in_run() -> None:
+    user = SimulatedUser(make_seed(), user_model=FakeProvider(patterned()))
+    assert user.reply([]) != ""
