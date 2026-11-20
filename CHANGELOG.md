@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/moodsona/moodsona/compare/v0.3.0...v0.3.1) (2026-11-20)
+
+
+### Bug Fixes
+
+* make moodsona --version print the version instead of a usage error ([#55](https://github.com/moodsona/moodsona/issues/55)) ([8228a1a](https://github.com/moodsona/moodsona/commit/8228a1a1dfd4c2f3b04d2422babc3fd6c958eedd))
+
 ## [0.3.0](https://github.com/moodsona/moodsona/compare/v0.2.0...v0.3.0) (2026-11-20)
 
 
