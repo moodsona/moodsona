@@ -8,10 +8,15 @@ name exists (for ``validate``: no file or directory).
 Exit codes:
     0: success.
     1: ``validate`` found problems, ``smoke`` could not load or run the persona,
-       ``report`` could not read the transcript, or ``bench`` failed.
+       ``report`` could not read the transcript, ``bench`` failed, or ``probe``
+       could not load the persona or its probes, failed, had a probe without a
+       single turn, or (with a real provider) found a rule below the
+       threshold. With the default fake provider ``probe`` is a dry run that
+       shows no verdicts.
     2: usage error (unknown command or bad arguments, printed by argparse; or
        ``validate`` got a missing path or found no persona file to check; or
-       ``bench`` got an unknown persona, or a paid provider without ``--yes``).
+       ``bench`` got an unknown persona; or ``bench`` or ``probe`` got a paid
+       provider without ``--yes``).
 """
 
 from __future__ import annotations
@@ -20,14 +25,16 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
+from fractions import Fraction
 from pathlib import Path
 
-from moodsona import bench
+from moodsona import bench, probe
 from moodsona.companion import EchoCompanion
 from moodsona.llm.base import LLMError
 from moodsona.llm.fake import FakeProvider
 from moodsona.personas import PersonaError, bundled_persona_path, load_persona
 from moodsona.runner import run
+from moodsona.state import PersonaSeed
 from moodsona.validation import YAML_SUFFIXES
 from moodsona.validation import main as validate_main
 
@@ -96,7 +103,50 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="keep runs already in --out with the same days and turns (resume a failed bench)",
     )
+    probe_cmd = commands.add_parser(
+        "probe",
+        help="experimental: check that each reaction rule fires on a scripted reply that "
+        "does what it describes (a real provider costs money)",
+    )
+    probe_cmd.add_argument(
+        "persona", help="path to a persona YAML file, or a bundled persona id (grieving-after-loss)"
+    )
+    probe_cmd.add_argument(
+        "--probes", help="probe YAML file (default: the bundled probes/<persona id>.yaml)"
+    )
+    probe_cmd.add_argument(
+        "--provider", choices=bench.PROVIDERS, default="fake", help="the user model (default: fake)"
+    )
+    probe_cmd.add_argument("--model", help="model id for anthropic/openai (default: the adapter's)")
+    probe_cmd.add_argument(
+        "--repeats",
+        type=_positive,
+        default=probe.DEFAULT_REPEATS,
+        help=f"runs per probe (default: {probe.DEFAULT_REPEATS})",
+    )
+    probe_cmd.add_argument(
+        "--threshold",
+        type=_share,
+        default=probe.DEFAULT_THRESHOLD,
+        help="share of its repeats a rule must fire in, compared exactly: a fraction such "
+        f"as 2/3 or 0.8 (default: {probe.DEFAULT_THRESHOLD}, so 2 of 3 repeats pass)",
+    )
+    probe_cmd.add_argument(
+        "--check",
+        action="store_true",
+        help="only check the probe file and show which rules it covers (no model calls)",
+    )
+    probe_cmd.add_argument(
+        "--yes", action="store_true", help="confirm that a paid provider may be called"
+    )
     return parser
+
+
+def _share(text: str) -> Fraction:
+    try:
+        return probe._as_threshold(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _persona_path(arg: str, *, dirs: bool) -> str:
@@ -135,14 +185,20 @@ def _validate(args: argparse.Namespace) -> int:
     return validate_main(paths)
 
 
-def _smoke(args: argparse.Namespace) -> int:
+def _load_seed(arg: str) -> PersonaSeed | None:
+    """The persona named by a command line argument; None after printing why it failed."""
     try:
-        seed = load_persona(_persona_path(args.persona, dirs=False))
+        return load_persona(_persona_path(arg, dirs=False))
     except KeyError as exc:  # only the id lookup raises it; load_persona checks the schema first
-        sys.stderr.write(f"{args.persona}: no such file, and {exc.args[0]}\n")
-        return 1
+        sys.stderr.write(f"{arg}: no such file, and {exc.args[0]}\n")
     except (PersonaError, FileNotFoundError) as exc:  # FileNotFoundError: broken install
         sys.stderr.write(f"{exc}\n")
+    return None
+
+
+def _smoke(args: argparse.Namespace) -> int:
+    seed = _load_seed(args.persona)
+    if seed is None:
         return 1
     if args.days < 1 or args.turns < 1:
         sys.stderr.write("--days and --turns must be at least 1\n")
@@ -191,6 +247,12 @@ def _report(args: argparse.Namespace) -> int:
             f"{name:<15}{num(s.mean):>6}{num(s.drift_per_day, '+.2f'):>11}{num(s.volatility):>12}"
         )
     intents = ", ".join(f"{k} {pct(v)}" for k, v in m.intent_shares.items() if v)
+    end_of_run = "n/a"
+    if m.end_emotion is not None:
+        end_of_run = f"emotion {m.end_emotion}, stance {m.final_stance}"
+    ended_early = "n/a (turns per day not recorded)"
+    if m.days_ended_early is not None:
+        ended_early = f"{m.days_ended_early} of {m.active_days} active day(s)"
     rules = ", ".join(f"rule {n} x{count}" for n, count in m.rule_counts.items())
     rows = [
         ("intents", intents or "n/a"),
@@ -206,6 +268,8 @@ def _report(args: argparse.Namespace) -> int:
         ("stance changes", f"{num(m.stance_changes_per_day, '.2f')} per day"),
         ("polluted", pct(m.polluted_share)),
         ("forced", pct(m.forced_share)),
+        ("end of run", end_of_run),
+        ("ended early", ended_early),
     ]
     lines += [f"{label:<15}{value}" for label, value in rows]
     sys.stdout.write("\n".join(lines) + "\n")
@@ -256,6 +320,104 @@ def _bench(args: argparse.Namespace) -> int:
     return 0
 
 
+def _probe(args: argparse.Namespace) -> int:
+    err, out = sys.stderr, sys.stdout
+    persona = _load_seed(args.persona)
+    if persona is None:
+        return 1
+    try:
+        path = args.probes or probe.bundled_probes_path(persona.id)
+        probes = probe.load_probes(persona, path)
+    except KeyError as exc:
+        err.write(f"{exc.args[0]}; write one (see docs/personas.md) and pass --probes FILE\n")
+        return 1
+    except (probe.ProbeError, FileNotFoundError) as exc:  # FileNotFoundError: broken install
+        err.write(f"{exc}\n")
+        return 1
+    if args.check:
+        out.write("\n".join(probe._format_coverage(persona, probes)) + "\n")
+        return 0
+    total = len(probes.probes)
+    if args.provider != "fake":
+        calls = probe._max_model_calls(total, args.repeats)
+        cost = (
+            f"--provider {args.provider} calls a paid API and costs money: up to {calls} model "
+            f"calls ({total} probe(s) x {args.repeats} repeat(s), one call each plus retries)."
+        )
+        if not args.yes:
+            err.write(f"{cost} Add --yes to run it.\n")
+            return 2
+        err.write(f"{cost}\n")
+        err.flush()
+    # The fake model never reports a rule, so with it every positive probe would
+    # "fail": run a dry run that checks the plumbing and judges nothing.
+    dry_run = args.provider == "fake"
+    finished = 0
+
+    def show(result: probe.ProbeResult) -> None:
+        # The report line on stdout; a short progress line on stderr, so a redirected
+        # report still shows how far the run is. Both are flushed per probe.
+        nonlocal finished
+        finished += 1
+        if dry_run:
+            out.write(f"{probe._format_dry_run(result)}\n")
+            out.flush()
+            return
+        out.write(f"{probe._format_result(result)}\n")
+        out.flush()
+        err.write(f"{probe._format_progress(result, finished, total)}\n")
+        err.flush()
+
+    try:
+        provider = bench.make_provider(args.provider, args.model)
+        label = bench.model_label(args.provider, provider)
+        out.write(
+            f"persona {persona.id}: {len(probes.probes)} probe(s) from {probes.source}, "
+            f"{args.repeats} repeat(s), model {label}\n"
+        )
+        if dry_run:
+            out.write(
+                "dry run: the fake provider cannot judge rules (it never reports one), so this "
+                "checks loading, prompts and plumbing only and shows no verdicts; pass "
+                "--provider anthropic or --provider openai for verdicts\n"
+            )
+        report = probe.run_probes(
+            persona,
+            probes,
+            user_model=provider,
+            repeats=args.repeats,
+            threshold=args.threshold,
+            progress=show,
+        )
+    except (LookupError, LLMError) as exc:  # LLMError: e.g. the SDK is not installed
+        err.write(f"{exc}\n")
+        return 1
+    if dry_run:
+        return _dry_run_summary(report, total)
+    out.write("\n".join(probe._format_report(report)) + "\n")
+    out.flush()
+    return 0 if report.passed else 1
+
+
+def _dry_run_summary(report: probe.ProbeReport, total: int) -> int:
+    """Print the last line of a dry run; 1 when a probe never produced a turn."""
+    if report.empty:
+        line = (
+            f"dry run failed: probe(s) {', '.join(report.empty)} had no valid repeat "
+            "(every turn fell back to the neutral line)"
+        )
+        code = 1
+    else:
+        line = (
+            f"dry run done: {total} probe(s) x {report.repeats} repeat(s), every probe "
+            "produced a turn; no verdicts without a real --provider"
+        )
+        code = 0
+    sys.stdout.write(line + "\n")
+    sys.stdout.flush()
+    return code
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the CLI and return its exit code."""
     args = _parser().parse_args(argv)
@@ -265,6 +427,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _bench(args)
     if args.command == "validate":
         return _validate(args)
+    if args.command == "probe":
+        return _probe(args)
     return _smoke(args)
 
 

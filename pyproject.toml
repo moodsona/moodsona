@@ -87,11 +87,14 @@ packages = ["src/moodsona"]
 # Ship the persona library (schema + YAML) inside the package so that
 # `importlib.resources.files("moodsona") / "personas"` works after pip install.
 "personas" = "moodsona/personas"
+# Rule probes for the bundled personas (`moodsona probe`), found the same way.
+"probes" = "moodsona/probes"
 
 [tool.hatch.build.targets.sdist]
 include = [
   "/src",
   "/personas",
+  "/probes",
   "/tests",
   "/LICENSE",
   "/LICENSE-DATA.md",
