@@ -274,3 +274,15 @@ def test_smoke_fails_cleanly_on_a_broken_install(
     monkeypatch.setattr("moodsona.personas.load_schema", missing)
     assert main(["smoke", str(EXAMPLE)]) == 1
     assert "bundled personas directory not found" in capsys.readouterr().err
+
+
+def test_version_flag_prints_the_package_version_and_exits_zero(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from moodsona import __version__
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--version"])
+
+    assert exit_info.value.code == 0
+    assert capsys.readouterr().out == f"moodsona {__version__}\n"

@@ -1,5 +1,7 @@
 """Command line interface: ``moodsona validate`` and ``moodsona smoke``.
 
+``moodsona --version`` prints the package version and exits 0.
+
 Both commands take persona file paths or the ids of bundled personas
 (``moodsona smoke anxious-newcomer``). Only a bare name (no directory part, no
 ``.yaml``/``.yml`` suffix) is looked up as an id, and only when no file of that
@@ -37,6 +39,7 @@ from moodsona.runner import run
 from moodsona.state import PersonaSeed
 from moodsona.validation import YAML_SUFFIXES
 from moodsona.validation import main as validate_main
+from moodsona.version import __version__
 
 
 def _positive(text: str) -> int:
@@ -52,6 +55,7 @@ def _parser() -> argparse.ArgumentParser:
         description="Emotional user simulator for testing AI companion chatbots.",
         epilog="Exit codes: 0 success, 1 problems found or run failed, 2 usage error.",
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     commands = parser.add_subparsers(dest="command", required=True)
     check = commands.add_parser(
         "validate", help="check persona files (schema, ids, no contact data)"

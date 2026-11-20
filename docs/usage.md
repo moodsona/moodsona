@@ -70,6 +70,7 @@ moodsona validate                     # all bundled personas
 moodsona validate my-persona.yaml     # your own files or directories
 moodsona smoke boundary-tester        # short offline run of a bundled persona
 moodsona smoke my-persona.yaml --days 2 --turns 4
+moodsona --version                    # print the installed version
 ```
 
 `validate` checks persona files against [`personas/schema.json`](../personas/schema.json)
