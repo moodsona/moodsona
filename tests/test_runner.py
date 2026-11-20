@@ -12,6 +12,7 @@ from moodsona.llm.base import ChatMessage
 from moodsona.llm.fake import FakeProvider, plumbing_reply
 from moodsona.prompts import NOTES_MARKER
 from moodsona.runner import TrajectoryPoint, Transcript, run
+from moodsona.version import __version__
 from support import block, make_seed, notes
 
 
@@ -194,6 +195,8 @@ def test_jsonl_keeps_the_run_header_and_skipped_days(tmp_path: Path) -> None:
     lines = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines()]
     assert lines[0] == {
         "kind": "run",
+        "format": 1,
+        "moodsona": __version__,
         "persona_id": "test-gardener",
         "rng_seed": 1,
         "days": 5,
@@ -207,6 +210,46 @@ def test_jsonl_keeps_the_run_header_and_skipped_days(tmp_path: Path) -> None:
     assert [line["day"] for line in by_kind["skipped_day"]] == transcript.skipped_days == [4]
     assert len(by_kind["turn"]) == len(transcript.turns)
     assert [line["day"] for line in by_kind["day_notes"]] == [n.day for n in transcript.notes]
+
+
+def _rewrite_run_line(path: Path, change: Callable[[dict[str, Any]], object]) -> None:
+    lines = path.read_text(encoding="utf-8").split("\n")
+    first = json.loads(lines[0])
+    change(first)
+    lines[0] = json.dumps(first)
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _tiny_transcript(tmp_path: Path) -> tuple[Transcript, Path]:
+    transcript = run(
+        make_seed(), EchoCompanion(), user_model=FakeProvider(), days=1, turns_per_day=1
+    )
+    out = tmp_path / "run.jsonl"
+    transcript.to_jsonl(out)
+    return transcript, out
+
+
+def test_transcript_format_round_trips(tmp_path: Path) -> None:
+    transcript, out = _tiny_transcript(tmp_path)
+    first = json.loads(out.read_text(encoding="utf-8").split("\n")[0])
+    assert first["format"] == 1
+    assert first["moodsona"] == __version__
+    assert Transcript.from_jsonl(out) == transcript
+
+
+def test_transcript_without_format_loads_as_format_1(tmp_path: Path) -> None:
+    transcript, out = _tiny_transcript(tmp_path)  # files from 0.2.0 have no such fields
+    _rewrite_run_line(out, lambda d: (d.pop("format"), d.pop("moodsona")))
+    assert Transcript.from_jsonl(out) == transcript
+
+
+@pytest.mark.parametrize("fmt", [2, 0, "1", 1.5, True, None])
+def test_transcript_with_another_format_is_rejected(tmp_path: Path, fmt: object) -> None:
+    _, out = _tiny_transcript(tmp_path)
+    _rewrite_run_line(out, lambda d: d.update(format=fmt))
+    with pytest.raises(ValueError, match=rf"format {fmt!r}.*reads format 1") as info:
+        Transcript.from_jsonl(out)
+    assert f"{out}:1:" in str(info.value)
 
 
 # run() without its type hints, to make the calls mypy would reject.

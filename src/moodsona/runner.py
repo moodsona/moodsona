@@ -20,9 +20,14 @@ from moodsona.companion import Companion
 from moodsona.llm.base import ChatMessage, LLMProvider
 from moodsona.simulator import SafetyHook, SimulatorConfig
 from moodsona.state import AppliedRule, DayNote, Mood, PersonaSeed, Stance
+from moodsona.version import __version__
 
 if TYPE_CHECKING:
     from moodsona.lang.base import LanguageProfile
+
+#: Version of the JSONL layout written by :meth:`Transcript.to_jsonl`. Files from
+#: 0.2.0 carry no ``format`` field and are format 1.
+TRANSCRIPT_FORMAT = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,14 +193,17 @@ class Transcript:
     def to_jsonl(self, path: str | PathLike[str]) -> None:
         """Write one JSON object per line.
 
-        Every line has a ``kind`` field. The first line is ``"run"`` (persona id,
-        random seed, days, turns per day); then one ``"turn"`` line per exchange,
+        Every line has a ``kind`` field. The first line is ``"run"`` (the
+        file ``format``, the moodsona version that wrote it, persona id, random
+        seed, days, turns per day); then one ``"turn"`` line per exchange,
         one ``"day_notes"`` line per day's notes and one ``"skipped_day"`` line
         per day the persona chose not to write.
         """
         lines: list[dict[str, Any]] = [
             {
                 "kind": "run",
+                "format": TRANSCRIPT_FORMAT,
+                "moodsona": __version__,
                 "persona_id": self.persona_id,
                 "rng_seed": self.rng_seed,
                 "days": self.days,
@@ -217,6 +225,8 @@ class Transcript:
 
         Blank lines and lines of an unknown ``kind`` are skipped, so files from
         newer versions with extra line kinds still load. One file holds one run.
+        A ``run`` line without a ``format`` field (written by 0.2.0) is read as
+        format 1.
 
         Args:
             path: A JSONL file.
@@ -226,7 +236,9 @@ class Transcript:
 
         Raises:
             OSError: The file cannot be read.
-            ValueError: The first line is not a ``run`` line, there is a second
+            ValueError: The first line is not a ``run`` line, its ``format`` is
+                not 1 (the message names the file's format and the supported
+                one), there is a second
                 ``run`` line, or a line is not valid JSON, misses a field or has
                 a field of the wrong type (the message names the line).
         """
@@ -243,6 +255,12 @@ class Transcript:
                 kind = data["kind"]
                 if transcript is None:
                     _require(kind == "run", f"the first line must be a 'run' line, got {kind!r}")
+                    file_format = data.get("format", 1)  # no field: written by 0.2.0
+                    _require(
+                        type(file_format) is int and file_format == TRANSCRIPT_FORMAT,
+                        f"unsupported transcript format {file_format!r}; "
+                        f"this version of moodsona reads format {TRANSCRIPT_FORMAT}",
+                    )
                     transcript = cls(
                         persona_id=str(data["persona_id"]),
                         rng_seed=int(data["rng_seed"]),

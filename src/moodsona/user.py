@@ -345,9 +345,13 @@ class SimulatedUser:
 
         Returns:
             The metrics. The agreement, ask-back and wrong-language rates use
-            the simulator's language profile (None when language checks are off).
+            the simulator's language profile (None when language checks are off),
+            and ``emotion_change`` is measured from this persona's initial state.
         """
-        return compute_metrics(self.transcript(history), language=self._simulator.language)
+        simulator = self._simulator
+        return compute_metrics(
+            self.transcript(history), language=simulator.language, persona=simulator.seed
+        )
 
     # -- bookkeeping ----------------------------------------------------------
 

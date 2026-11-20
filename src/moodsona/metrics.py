@@ -19,6 +19,13 @@ What is counted over what:
 * A rate is None when there is nothing to count (no turns, no messages, or no
   language profile), never a misleading 0.
 
+A few numbers describe where the run left the user rather than how the user
+model played it: ``emotion.mean``, ``end_emotion``, ``emotion_change``,
+``final_stance`` and ``days_ended_early``. To compare companions, use
+``emotion.mean`` (mean emotion over the run) as the primary outcome, over
+several repeats (:mod:`moodsona.repeats`): it varies far less between repeats
+than ``end_emotion``, which hangs on the last exchange or two.
+
 The agreement, ask-back and wrong-language checks are the language profile's
 heuristics (:mod:`moodsona.lang`), and the own-repeat check uses the
 simulator's thresholds, so the metrics count what the rails look for.
@@ -39,7 +46,7 @@ from moodsona.lang import get_profile
 from moodsona.lang.base import LanguageProfile
 from moodsona.runner import Transcript, TurnRecord
 from moodsona.simulator import SimulatorConfig
-from moodsona.state import Intent
+from moodsona.state import Intent, PersonaSeed
 
 #: Messages with at most this many words count as short.
 SHORT_MAX_WORDS = 3
@@ -75,7 +82,9 @@ class TranscriptMetrics:
         messages: Turns that are not polluted (the base of the message rates).
         active_days: Days with at least one turn.
         days_skipped: Days the persona chose not to write.
-        emotion: Emotion trajectory summary.
+        emotion: Emotion trajectory summary. ``emotion.mean``, the mean
+            emotion over the run, is the primary outcome for comparing
+            companions.
         energy: Energy trajectory summary.
         intent_shares: Share of messages per intent, every intent listed,
             plus ``"other"`` when some intent is missing or unknown (empty
@@ -96,6 +105,17 @@ class TranscriptMetrics:
             divided by the active days.
         polluted_share: Share of turns that fell back to the neutral line.
         forced_share: Share of turns accepted despite a soft rail.
+        end_emotion: Emotion after the last message (a noisy outcome: it
+            hangs on the last exchange or two); None without messages.
+        emotion_change: ``end_emotion`` minus the persona's initial emotion;
+            None without messages or when :func:`compute_metrics` was not
+            given the persona (transcripts do not record the start).
+        final_stance: Stance after the last message (the last day's notes
+            may change it again; that is not recorded); None without messages.
+        days_ended_early: Active days with fewer turns than ``turns_per_day``
+            (the persona ended them, or the transcript was taken mid-day);
+            None when the transcript does not record ``turns_per_day``.
+            Skipped days are in ``days_skipped``, not here.
     """
 
     persona_id: str
@@ -118,6 +138,10 @@ class TranscriptMetrics:
     stance_changes_per_day: float | None
     polluted_share: float | None
     forced_share: float | None
+    end_emotion: int | None
+    emotion_change: int | None
+    final_stance: str | None
+    days_ended_early: int | None
 
     def to_dict(self) -> dict[str, Any]:
         """JSON-ready form (rule numbers become string keys, as JSON requires)."""
@@ -190,6 +214,7 @@ def compute_metrics(
     *,
     language: LanguageProfile | str | None = "en",
     short_max_words: int = SHORT_MAX_WORDS,
+    persona: PersonaSeed | None = None,
 ) -> TranscriptMetrics:
     """Compute the metrics of one run.
 
@@ -201,15 +226,31 @@ def compute_metrics(
             English; transcripts do not record the language). None turns the
             three checks off; their rates are then None.
         short_max_words: Messages with at most this many words count as short.
+        persona: The persona the run simulated, for ``emotion_change``
+            (transcripts do not record the starting state). Without it
+            ``emotion_change`` is None; nothing else depends on it.
 
     Returns:
         The metrics.
+
+    Raises:
+        ValueError: ``persona`` has another id than the transcript.
     """
+    if persona is not None and persona.id != transcript.persona_id:
+        raise ValueError(
+            f"persona {persona.id!r} is not the one this transcript simulated "
+            f"({transcript.persona_id!r})"
+        )
     profile = get_profile(language) if isinstance(language, str) else language
     turns = transcript.turns
     messages = [t for t in turns if not t.polluted and t.hidden is not None]
     hidden = [t.hidden for t in messages if t.hidden is not None]  # the same, typed for mypy
     active_days = len({t.day for t in turns})
+    last = messages[-1].mood if messages else None
+    ended_early = None
+    if transcript.turns_per_day is not None:
+        per_day = Counter(t.day for t in turns)
+        ended_early = sum(n < transcript.turns_per_day for n in per_day.values())
 
     intent_shares: dict[str, float] = {}
     if hidden:
@@ -249,6 +290,14 @@ def compute_metrics(
         stance_changes_per_day=stance_changes / active_days if active_days else None,
         polluted_share=_share([t.polluted for t in turns]),
         forced_share=_share([t.forced is not None for t in turns]),
+        end_emotion=None if last is None else last.emotion,
+        emotion_change=(
+            None
+            if last is None or persona is None
+            else last.emotion - persona.initial_state.emotion
+        ),
+        final_stance=None if last is None else last.stance.value,
+        days_ended_early=ended_early,
     )
 
 
@@ -257,6 +306,7 @@ def metrics_from_jsonl(
     *,
     language: LanguageProfile | str | None = "en",
     short_max_words: int = SHORT_MAX_WORDS,
+    persona: PersonaSeed | None = None,
 ) -> TranscriptMetrics:
     """Read a transcript JSONL file and compute its metrics.
 
@@ -264,10 +314,14 @@ def metrics_from_jsonl(
         path: A file written by :meth:`Transcript.to_jsonl`.
         language: See :func:`compute_metrics`.
         short_max_words: See :func:`compute_metrics`.
+        persona: See :func:`compute_metrics`.
 
     Raises:
         OSError: The file cannot be read.
-        ValueError: The file is not a transcript.
+        ValueError: The file is not a transcript, or ``persona`` is another
+            persona.
     """
     transcript = Transcript.from_jsonl(path)
-    return compute_metrics(transcript, language=language, short_max_words=short_max_words)
+    return compute_metrics(
+        transcript, language=language, short_max_words=short_max_words, persona=persona
+    )
