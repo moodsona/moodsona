@@ -191,6 +191,12 @@ def _report(args: argparse.Namespace) -> int:
             f"{name:<15}{num(s.mean):>6}{num(s.drift_per_day, '+.2f'):>11}{num(s.volatility):>12}"
         )
     intents = ", ".join(f"{k} {pct(v)}" for k, v in m.intent_shares.items() if v)
+    end_of_run = "n/a"
+    if m.end_emotion is not None:
+        end_of_run = f"emotion {m.end_emotion}, stance {m.final_stance}"
+    ended_early = "n/a (turns per day not recorded)"
+    if m.days_ended_early is not None:
+        ended_early = f"{m.days_ended_early} of {m.active_days} active day(s)"
     rules = ", ".join(f"rule {n} x{count}" for n, count in m.rule_counts.items())
     rows = [
         ("intents", intents or "n/a"),
@@ -206,6 +212,8 @@ def _report(args: argparse.Namespace) -> int:
         ("stance changes", f"{num(m.stance_changes_per_day, '.2f')} per day"),
         ("polluted", pct(m.polluted_share)),
         ("forced", pct(m.forced_share)),
+        ("end of run", end_of_run),
+        ("ended early", ended_early),
     ]
     lines += [f"{label:<15}{value}" for label, value in rows]
     sys.stdout.write("\n".join(lines) + "\n")

@@ -590,8 +590,11 @@ def test_transcript_and_metrics_make_no_model_calls() -> None:
     assert [n.day for n in snapshot.notes] == [1]  # day 2's notes are not written yet
     assert snapshot.days == 2
     metrics = user.metrics(history)
-    assert metrics == compute_metrics(snapshot)
+    assert metrics == compute_metrics(snapshot, persona=make_seed())
     assert (metrics.turns, metrics.active_days) == (3, 2)
+    # The simulated user knows its persona, so the change from the start is filled in.
+    assert metrics.end_emotion is not None
+    assert metrics.emotion_change == metrics.end_emotion - make_seed().initial_state.emotion
     assert provider.calls == calls
 
     # Nothing changed: the conversation goes on where it was.
