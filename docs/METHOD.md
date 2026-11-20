@@ -186,7 +186,8 @@ more guarded user on day two.
 ## Output
 
 `Transcript.to_jsonl(path)` writes one JSON object per line. The first line
-has `"kind": "run"`: the persona id, the random seed (`rng_seed`), `days` and
+has `"kind": "run"`: the file format version (`"format": 1`), the moodsona
+version that wrote it (`"moodsona"`), the persona id, the random seed (`rng_seed`), `days` and
 `turns_per_day`. Each exchange is then a line with `"kind": "turn"`: day, turn,
 the hidden block (including `rules_triggered` as the model reported it), the
 user's visible message, the companion's reply, the state after the turn, the
@@ -211,7 +212,11 @@ The JSONL is meant to be read by people as well as by scripts. Reading the
 inner thoughts next to the bot's replies is often the fastest way to find the
 problem.
 
-`Transcript.from_jsonl(path)` reads a file back. `moodsona.metrics`
+`Transcript.from_jsonl(path)` reads a file back. It accepts `format` 1, and
+also a file with no `format` field (written by 0.2.0, which is format 1); any
+other `format` raises a `ValueError` naming the file's format and the supported
+one. The number changes only when the layout changes in a way an older reader
+cannot ignore; new line kinds and fields do not change it. `moodsona.metrics`
 (`moodsona report run.jsonl` on the command line) turns a transcript into
 numbers about the simulated user: the emotion and energy trajectory (mean,
 least-squares drift per day, mean absolute change per turn), the share of each
