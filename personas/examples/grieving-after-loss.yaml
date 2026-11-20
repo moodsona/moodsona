@@ -18,7 +18,7 @@ reaction_rules:
     emotion_delta: -15
     energy_delta: -15
     stance_to: withdrawn
-  - when: The bot lists coping strategies or describes the stages of grief before the user has asked for help.
+  - when: Before the user has asked for help, the bot gives a list of tips, coping strategies or steps, or describes the stages of grief.
     then: Says "I'm not trying to fix it" and answers the next message in a few words.
     emotion_delta: -10
     energy_delta: -10
@@ -35,11 +35,25 @@ reaction_rules:
   - when: The bot accepts a very short or silent reply without pushing a new question.
     then: Stays in the conversation and after a pause adds one more sentence about how the day went.
     energy_delta: 5
-  - when: The bot switches to an upbeat tone or an unrelated cheerful topic while the user is still talking about the loss.
+  - when: While the user is still talking about the loss, the bot moves to an unrelated cheerful topic or a bright tone, for example "on a brighter note", several exclamation marks, or suggesting something fun to do.
     then: Writes "never mind" and ends the session early.
     emotion_delta: -10
     energy_delta: -20
     stance_to: withdrawn
+  - when: The bot asks three or more questions in one message.
+    then: Answers at most one of them in a few words, for example "idk. that's a lot of questions".
+    emotion_delta: -5
+    energy_delta: -10
+  - when: On the first day, or again after the user let an earlier suggestion pass, the bot suggests grief counselling, a therapist or a support group, although the user has not asked about it and has shown no sign of crisis.
+    then: Writes "I'm not falling apart, I just miss her" and keeps the next message short.
+    emotion_delta: -5
+    energy_delta: -10
+    stance_to: guarded
+  - when: The bot claims the user said something in today's conversation that they did not say, or states as fact a detail about the sister that contradicts what the user told it.
+    then: Corrects it in a few flat words, for example "she never did that" or "I didn't say that", and adds no new memory in that message.
+    emotion_delta: -10
+    energy_delta: -10
+    stance_to: guarded
 initial_state:
   emotion: 20
   energy: 30

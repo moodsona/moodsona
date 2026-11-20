@@ -1,7 +1,8 @@
 # Usage guide
 
 Everything past the [README](../README.md) quickstart: real model providers,
-the command line, metrics, the benchmark scaffold and the fidelity check.
+the command line, metrics, comparing companions over repeated runs, the
+benchmark scaffold and the fidelity check.
 
 ## Real models and your bot
 
@@ -111,6 +112,82 @@ short messages, messages in the wrong language, stance changes per day and
 days skipped. The numbers describe the simulated user, not your bot; compare
 them across user models, personas or seeds. Exact definitions are in the
 module docstring. New in v0.2; names may still change before 1.0.
+
+A few of the numbers say where the run left the user: `emotion.mean` (mean
+emotion over the run), `end_emotion` and `final_stance` (after the last
+message), `days_ended_early` (days the persona ended before `turns_per_day`)
+and `emotion_change` (end emotion minus the persona's initial emotion; pass
+`compute_metrics(transcript, persona=persona)`, because the transcript does
+not record the start). `moodsona report` prints all of them but
+`emotion_change` (`null` in its `--json` output).
+
+## Comparing companions: repeats and mean emotion
+
+One run of a persona against your bot is one sample. The model that plays the
+persona samples its words, so two runs differ even with the same `rng_seed`:
+the seed fixes only the overnight energy offsets and the typing noise, not
+the model's output. To compare two bots (or two versions of one):
+
+> `run_repeats`, `summarize_runs` and `compare_runs` are new in 0.3 and may
+> change in a later 0.x release.
+
+- **Use mean emotion over the run as the primary outcome**, not the emotion
+  at the end. The end value hangs on the last exchange or two. In a 75-run
+  study by the maintainer (5 bot variants x 5 personas x 3 repeats) the spread
+  between repeats of the same setup, as a pooled standard deviation, was 3.7
+  points for mean emotion and 9.1 for the end value.
+- **Run 5 to 10 repeats per bot** and look at the spread. At those spreads,
+  and with `compare_runs` (Welch, alpha 0.05, power 0.8, checked by
+  simulation), a true difference in mean emotion of about 10 points takes
+  about 4 repeats per bot, about 8 points 5 repeats and about 5 points 10
+  repeats; three repeats show only differences of about 13 points or more.
+  With the end value, 10 points take about 14 repeats per bot.
+
+```python
+import moodsona
+from moodsona.llm.anthropic import AnthropicProvider
+from moodsona.repeats import compare_runs, run_repeats, summarize_runs
+
+persona = moodsona.load_bundled_persona("anxious-newcomer")
+provider = AnthropicProvider()
+# MyBot, OtherBot: your companion classes; every repeat is a full paid run
+mine = run_repeats(
+    persona,
+    MyBot,
+    repeats=5,
+    user_model=provider,
+    rng_seed=7,
+    on_run=lambda t: t.to_jsonl(f"mybot-seed{t.rng_seed}.jsonl"),
+)
+theirs = run_repeats(persona, OtherBot, repeats=5, user_model=provider, rng_seed=7)
+print(summarize_runs(mine, persona=persona).to_text())
+print(compare_runs(summarize_runs(mine), summarize_runs(theirs)).to_text())  # mine minus theirs
+```
+
+`run_repeats` takes a companion *factory* (your class, or
+`lambda: MyBot(url)`) and makes a new companion per run, so a bot with its own
+memory does not carry one run into the next. Repeat `i` runs with
+`rng_seed + i`: with one seed for all repeats they would share the same
+overnight energy and typing noise, and the spread would leave that part out.
+The same starting seed for two bots gives their repeats the same overnight
+energy offsets and typing-noise draws, nothing more; `compare_runs` treats the
+two sets as independent, not as pairs. Runs are sequential, and each one
+costs a full run's model calls. `on_run` gets each transcript as soon as it is
+done (to write it to disk, say); if a repeat fails, `run_repeats` raises
+`RepeatRunError`, whose `transcripts` holds the runs finished so far.
+
+`summarize_runs` works on any transcripts, including ones read back with
+`Transcript.from_jsonl`. For mean emotion, end emotion, emotion change, mean
+energy, turns and days ended early it gives the number of runs, the mean, the
+sample standard deviation, min, max and a 95 % t interval for the mean
+(`ci95`), plus a count of final stances. With one run there is no SD and no
+interval; with two the interval is honest and very wide. When every run has
+the same value (SD 0) the interval shrinks to a point; that is not certainty,
+and `to_text()` shows it as `n/a (no spread)`. `compare_runs` gives
+the difference in means between two summaries with a Welch 95 % interval
+(`measure=` picks another measure). An interval that includes 0 does not mean
+the bots are equally good, only that there are too few runs to tell them
+apart.
 
 ## Benchmark (scaffold)
 
