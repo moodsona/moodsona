@@ -48,3 +48,14 @@ def test_the_readme_quickstart_runs_and_its_console_output_is_real(
             shown = shown[:-1]
             printed = printed[: len(shown)]
         assert printed == shown, command
+
+
+def test_the_readme_has_no_relative_links_or_images() -> None:
+    """PyPI renders the README away from the repository, so every target must be absolute."""
+    text = README.read_text(encoding="utf-8")
+    text = re.sub(r"^```.*?^```", "", text, flags=re.MULTILINE | re.DOTALL)  # code is not a link
+    targets = re.findall(r"!?\[[^\]]*\]\(\s*<?([^)\s>]+)", text)  # inline links and images
+    targets += re.findall(r"""\b(?:src|href)=["']([^"']+)["']""", text)  # raw HTML
+    targets += re.findall(r"^\[[^\]]+\]:\s*(\S+)", text, flags=re.M)  # reference definitions
+    relative = [target for target in targets if not target.startswith(("http://", "https://"))]
+    assert relative == []

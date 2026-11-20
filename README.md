@@ -178,7 +178,7 @@ For a real run, replace `FakeProvider()` with `AnthropicProvider()` or
 CLI, every metric in `report`, the `bench` scaffold for comparing user models,
 and the experimental fidelity check. One run is one sample, and `rng_seed`
 does not make the model's output repeat: to compare bots, use mean emotion
-over 5 to 10 repeats ([`moodsona.repeats`](docs/usage.md#comparing-companions-repeats-and-mean-emotion)).
+over 5 to 10 repeats ([`moodsona.repeats`](https://github.com/moodsona/moodsona/blob/main/docs/usage.md#comparing-companions-repeats-and-mean-emotion)).
 
 ## Personas
 
@@ -196,7 +196,7 @@ All are fictional adults, in English, licensed CC BY 4.0.
 | [`conflict-at-work`](https://github.com/moodsona/moodsona/blob/main/personas/examples/conflict-at-work.yaml) | Manager took credit for their work; furious, cools over days | Listening before fixing; not taking the other side; repetitive validation |
 
 Personas do not contain crisis or self-harm scenarios (see
-[What it is, and what it is not](#what-it-is-and-what-it-is-not)). To write
+[What it is, and what it is not](https://github.com/moodsona/moodsona#what-it-is-and-what-it-is-not)). To write
 your own persona, see [docs/personas.md](https://github.com/moodsona/moodsona/blob/main/docs/personas.md).
 
 ## Documentation
@@ -215,7 +215,7 @@ your own persona, see [docs/personas.md](https://github.com/moodsona/moodsona/bl
   personas.
 - **v0.2** (shipped): run metrics and `moodsona report`, the `moodsona bench`
   scaffold, an experimental classifier two-sample fidelity check.
-- **v0.3**: mean emotion as the primary outcome, with `moodsona.repeats`
+- **v0.3** (shipped): mean emotion as the primary outcome, with `moodsona.repeats`
   helpers to run a persona several times and compare two companions; rule
   probes that check each reaction rule can fire; persona rules for careless
   formats (advice lists, stacked questions, early referrals); and a
